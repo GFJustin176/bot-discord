@@ -41,6 +41,16 @@ describe('classifyQuery (Identificação Multi-Plataforma de URLs e Buscas)', ()
       value: 'https://music.youtube.com/playlist?list=OLAK5uy_n12345',
       id: 'OLAK5uy_n12345',
     });
+
+    // Links do YouTube Music copiados com música aberta dentro de uma playlist/álbum (&list=PL... ou OLAK5uy_...)
+    expect(
+      classifyQuery('https://music.youtube.com/watch?v=abc123XYZ_-&list=PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI'),
+    ).toEqual({
+      platform: 'ytmusic',
+      kind: 'playlist',
+      value: 'https://www.youtube.com/playlist?list=PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI',
+      id: 'PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI',
+    });
   });
 
   it('identifica faixas, álbuns e playlists do Spotify incluindo rotas /intl-pt/', () => {

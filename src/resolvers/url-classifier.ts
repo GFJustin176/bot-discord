@@ -16,6 +16,20 @@ const SPOTIFY_REGEX =
   /^https?:\/\/open\.spotify\.com\/(?:intl-[a-zA-Z-]+\/)?(track|playlist|album)\/([a-zA-Z0-9]+)/i;
 
 /**
+ * Verifica se o parâmetro list= do YouTube / YouTube Music representa uma playlist ou álbum real
+ * (ex: PL..., OLAK5uy_..., UU..., FL..., RDCLAK5uy_...) e não um Mix automático de rádio (RD... / RDAMVM...).
+ */
+function isExplicitPlaylistId(listId: string): boolean {
+  if (listId.startsWith('RDCLAK5uy_')) {
+    return true;
+  }
+  if (listId.startsWith('RD')) {
+    return false;
+  }
+  return true;
+}
+
+/**
  * Classifica uma entrada textual (URL do YouTube, YouTube Music, Spotify ou busca livre)
  * para direcionar ao resolver apropriado.
  */
@@ -42,8 +56,13 @@ export function classifyQuery(rawInput: string): ClassifiedQuery {
     if (host === 'youtu.be') {
       const videoId = url.pathname.slice(1).split('/')[0];
       const listId = url.searchParams.get('list');
-      if (listId && !videoId) {
-        return { platform: 'youtube', kind: 'playlist', value: input, id: listId };
+      if (listId && isExplicitPlaylistId(listId)) {
+        return {
+          platform: 'youtube',
+          kind: 'playlist',
+          value: `https://www.youtube.com/playlist?list=${listId}`,
+          id: listId,
+        };
       }
       if (videoId) {
         return { platform: 'youtube', kind: 'track', value: input, id: videoId };
@@ -62,8 +81,36 @@ export function classifyQuery(rawInput: string): ClassifiedQuery {
       const listId = url.searchParams.get('list');
       const videoId = url.searchParams.get('v');
 
+      // Suporte a links de navegação de playlist do YouTube Music (/browse/VLPL...)
+      if (url.pathname.startsWith('/browse/VL')) {
+        const browseListId = url.pathname.slice('/browse/VL'.length).split('/')[0];
+        if (browseListId) {
+          return {
+            platform,
+            kind: 'playlist',
+            value: `https://www.youtube.com/playlist?list=${browseListId}`,
+            id: browseListId,
+          };
+        }
+      }
+
       if (url.pathname.startsWith('/playlist') && listId) {
-        return { platform, kind: 'playlist', value: input, id: listId };
+        return {
+          platform,
+          kind: 'playlist',
+          value: input,
+          id: listId,
+        };
+      }
+
+      // Se o link for /watch?v=...&list=PL... (ou OLAK5uy_...), trata como a playlist solicitada.
+      if (listId && isExplicitPlaylistId(listId)) {
+        return {
+          platform,
+          kind: 'playlist',
+          value: `https://www.youtube.com/playlist?list=${listId}`,
+          id: listId,
+        };
       }
 
       if (videoId) {
@@ -84,4 +131,3 @@ export function classifyQuery(rawInput: string): ClassifiedQuery {
     value: input,
   };
 }
-
