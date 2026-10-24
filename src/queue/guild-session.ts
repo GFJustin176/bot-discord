@@ -8,14 +8,16 @@ import {
   createAudioPlayer,
   getVoiceConnection,
 } from '@discordjs/voice';
+import type { TextBasedChannel } from 'discord.js';
 import { PrebufferCache } from '../audio/prebuffer-cache.js';
 import { createLowJitterAudioResource } from '../audio/stream-pipeline.js';
 import { getEnvConfig } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { TrackQueue } from './ring-queue.js';
-import type { CompactTrack } from './track.js';
+import { type CompactTrack, formatDuration, getSourceLabel } from './track.js';
 
 export type PlayResourceFn = (resource: AudioResource) => void;
+export type TextSender = { send(content: string): Promise<unknown> };
 
 /**
  * Orquestrador de reprodução por servidor Discord (Guild).
@@ -36,6 +38,7 @@ export class GuildSession {
   private ingestingPlaylistCount = 0;
   private transitioning = false;
   private destroyed = false;
+  private textChannel?: TextSender | null;
 
   constructor(
     guildId: string,
@@ -87,6 +90,11 @@ export class GuildSession {
   // Indica se a sessão foi destruída.
   public get isDestroyed(): boolean {
     return this.destroyed;
+  }
+
+  // Define o canal de texto onde as notificações de troca de música serão enviadas.
+  public setTextChannel(channel: TextSender | TextBasedChannel | null | undefined): void {
+    this.textChannel = channel && 'send' in channel ? (channel as TextSender) : null;
   }
 
   // Vincula o AudioPlayer da sessão a uma VoiceConnection ativa.
@@ -216,6 +224,16 @@ export class GuildSession {
 
           // Com a faixa N já tocando na RAM, dispara em background o pré-carregamento da faixa N+1.
           this.triggerNextTrackPrefetch();
+
+          // Notifica no chat a música que começou a tocar no momento
+          if (this.textChannel && 'send' in this.textChannel) {
+            const sourceLabel = getSourceLabel(nextTrack.source);
+            void this.textChannel
+              .send(
+                `🎶 Tocando agora: **${nextTrack.title}** — *${nextTrack.artist}* (\`${formatDuration(nextTrack.durationMs)}\`) [Origem: **${sourceLabel}**]`,
+              )
+              .catch(() => undefined);
+          }
 
           return nextTrack;
         } catch (err) {

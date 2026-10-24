@@ -5,7 +5,7 @@ import {
   getGuildSession,
   getOrCreateGuildSession,
 } from '../../queue/guild-session.js';
-import { formatDuration } from '../../queue/track.js';
+import { formatDuration, getSourceLabel } from '../../queue/track.js';
 import { resolveSpotifyStream } from '../../resolvers/spotify-resolver.js';
 import { classifyQuery } from '../../resolvers/url-classifier.js';
 import {
@@ -38,6 +38,7 @@ export async function handlePlayCommand(ctx: CommandContext): Promise<void> {
   await ctx.defer();
 
   const session = getOrCreateGuildSession(ctx.guildId);
+  session.setTextChannel(ctx.textChannel);
   if (session.queue.remainingCapacity <= 0) {
     await ctx.reply(
       `A fila atingiu a capacidade máxima de **${getEnvConfig().maxQueueSize.toLocaleString('pt-BR')}** músicas.`,
@@ -80,11 +81,11 @@ export async function handlePlayCommand(ctx: CommandContext): Promise<void> {
 
     if (kind === 'track') {
       await ctx.reply(
-        `Adicionada via **Spotify**: **${firstTrack.artist} — ${firstTrack.title}** (\`${formatDuration(firstTrack.durationMs)}\`)`,
+        `Adicionada à fila (#${session.queue.size}): **${firstTrack.title}** — *${firstTrack.artist}* (\`${formatDuration(firstTrack.durationMs)}\`) [Origem: **Spotify**]`,
       );
     } else {
       await ctx.reply(
-        `Iniciando **${firstTrack.artist} — ${firstTrack.title}** via **Spotify** (${kind === 'playlist' ? 'Playlist' : 'Álbum'}).\nAs demais faixas estão sendo carregadas em segundo plano (limite até 25.000 músicas).`,
+        `Iniciando **${firstTrack.artist} — ${firstTrack.title}** [Origem: **Spotify**] (${kind === 'playlist' ? 'Playlist' : 'Álbum'}).\nAs demais faixas estão sendo carregadas em segundo plano (limite até 25.000 músicas).`,
       );
     }
     return;
@@ -107,9 +108,9 @@ export async function handlePlayCommand(ctx: CommandContext): Promise<void> {
       return;
     }
 
-    const label = classified.platform === 'ytmusic' ? 'YouTube Music' : 'YouTube';
+    const label = getSourceLabel(classified.platform);
     await ctx.reply(
-      `Iniciando playlist do **${label}** com **${firstTrack.title}** (\`${formatDuration(firstTrack.durationMs)}\`).\nO restante da playlist está sendo enfileirado em segundo plano.`,
+      `Iniciando playlist [Origem: **${label}**] com **${firstTrack.title}** (\`${formatDuration(firstTrack.durationMs)}\`).\nO restante da playlist está sendo enfileirado em segundo plano.`,
     );
     return;
   }
@@ -121,13 +122,14 @@ export async function handlePlayCommand(ctx: CommandContext): Promise<void> {
 
   await session.enqueueAndPlay([track]);
 
+  const sourceLabel = getSourceLabel(track.source);
   if (!wasPlaying) {
     await ctx.reply(
-      `Tocando agora (pré-buffer em RAM): **${track.title}** — *${track.artist}* (\`${formatDuration(track.durationMs)}\`)`,
+      `Iniciando reprodução: **${track.title}** — *${track.artist}* (\`${formatDuration(track.durationMs)}\`) [Origem: **${sourceLabel}**]`,
     );
   } else {
     await ctx.reply(
-      `Adicionada à fila (#${session.queue.size}): **${track.title}** — *${track.artist}* (\`${formatDuration(track.durationMs)}\`)`,
+      `Adicionada à fila (#${session.queue.size}): **${track.title}** — *${track.artist}* (\`${formatDuration(track.durationMs)}\`) [Origem: **${sourceLabel}**]`,
     );
   }
 }
@@ -141,13 +143,12 @@ export async function handleSkipCommand(ctx: CommandContext): Promise<void> {
   }
 
   const skippedTitle = session.nowPlaying?.title ?? 'Faixa atual';
+  session.setTextChannel(ctx.textChannel);
   await ctx.defer();
   const next = await session.skip();
 
   if (next) {
-    await ctx.reply(
-      `Pulada **${skippedTitle}**.\nTocando agora: **${next.title}** — *${next.artist}* (\`${formatDuration(next.durationMs)}\`)`,
-    );
+    await ctx.reply(`Pulada **${skippedTitle}**.`);
   } else {
     await ctx.reply(`Pulada **${skippedTitle}**. A fila terminou (permanecendo no canal de voz).`);
   }

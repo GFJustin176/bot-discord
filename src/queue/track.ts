@@ -1,6 +1,19 @@
 // Origem de mídia suportada pelo bot.
 export type TrackSource = 'youtube' | 'ytmusic' | 'spotify';
 
+// Retorna o nome amigável da origem da música.
+export function getSourceLabel(source: TrackSource): string {
+  switch (source) {
+    case 'ytmusic':
+      return 'YouTube Music';
+    case 'spotify':
+      return 'Spotify';
+    case 'youtube':
+    default:
+      return 'YouTube';
+  }
+}
+
 // Modo de repetição da fila de reprodução.
 export type LoopMode = 'off' | 'track' | 'queue';
 

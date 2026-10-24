@@ -31,3 +31,4 @@ describe('defaultYtDlpRamLoader Fallback (Vídeo Indisponível na URL Direta)', 
     expect(targetCalls[1]).toContain('The Long Faces - Jane! audio');
   });
 });
+

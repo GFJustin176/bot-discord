@@ -3,6 +3,7 @@ import {
   type ChatInputCommandInteraction,
   GuildMember,
   type Message,
+  type TextBasedChannel,
   type VoiceBasedChannel,
 } from 'discord.js';
 
@@ -59,6 +60,7 @@ export interface CommandContext {
   readonly guildId: string;
   readonly userTag: string;
   readonly voiceChannel: VoiceBasedChannel | null;
+  readonly textChannel: TextBasedChannel | null;
   readonly voiceAdapterCreator: DiscordGatewayAdapterCreator;
   getStringArg(name: string, index?: number): string | undefined;
   getIntArg(name: string, index?: number): number | undefined;
@@ -83,6 +85,7 @@ export function createSlashCommandContext(
     guildId: interaction.guildId,
     userTag: interaction.user.tag,
     voiceChannel,
+    textChannel: interaction.channel,
     voiceAdapterCreator: guild.voiceAdapterCreator as unknown as DiscordGatewayAdapterCreator,
 
     getStringArg(name: string): string | undefined {
@@ -129,6 +132,7 @@ export function createPrefixCommandContext(
     guildId: message.guildId,
     userTag: message.author.tag,
     voiceChannel,
+    textChannel: message.channel,
     voiceAdapterCreator: guild.voiceAdapterCreator as unknown as DiscordGatewayAdapterCreator,
 
     getStringArg(_name: string, index = 0): string | undefined {
