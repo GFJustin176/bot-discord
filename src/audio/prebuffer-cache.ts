@@ -42,64 +42,81 @@ export async function defaultYtDlpRamLoader(
   track: CompactTrack,
   maxRamBytes: number,
   signal: AbortSignal,
+  processRunner = runProcessToBuffer,
 ): Promise<PrebufferedAudio> {
   const { ytdlpPath, ytdlpCookieArgs } = getEnvConfig();
   const isHttp = track.locator.startsWith('http://') || track.locator.startsWith('https://');
-  const target = isHttp ? track.locator : `ytsearch1:${track.locator}`;
+  const initialTarget = isHttp ? track.locator : `ytsearch1:${track.locator}`;
 
-  // Faixas muito longas (> 15 min) usam URL de stream para evitar alocar dezenas de MB na RAM.
-  if (track.durationMs > MAX_RAM_TRACK_DURATION_MS) {
-    const urlBuf = await runProcessToBuffer(
+  const fetchTarget = async (target: string): Promise<PrebufferedAudio> => {
+    // Faixas muito longas (> 15 min) usam URL de stream para evitar alocar dezenas de MB na RAM.
+    if (track.durationMs > MAX_RAM_TRACK_DURATION_MS) {
+      const urlBuf = await processRunner(
+        ytdlpPath,
+        [
+          '-f',
+          '251/bestaudio[acodec=opus]/bestaudio',
+          '-g',
+          '--no-playlist',
+          '--no-warnings',
+          ...ytdlpCookieArgs,
+          target,
+        ],
+        { signal, timeoutMs: 20_000, maxBytes: 64 * 1024 },
+      );
+      const streamUrl = urlBuf.toString('utf-8').trim().split(/\r?\n/)[0]?.trim();
+      if (!streamUrl) {
+        throw new Error(`Não foi possível obter URL de stream para faixa longa: ${track.title}`);
+      }
+      return { mode: 'direct-url', streamUrl };
+    }
+
+    // Baixa os pacotes WebM/Opus (formato 251) diretamente via stdout para a memória RAM.
+    const audioBuffer = await processRunner(
       ytdlpPath,
       [
         '-f',
-        '251/bestaudio[acodec=opus]/bestaudio',
-        '-g',
+        '251/250/249/bestaudio[acodec=opus]/bestaudio',
+        '-o',
+        '-',
         '--no-playlist',
         '--no-warnings',
+        '--no-part',
+        '--concurrent-fragments',
+        '4',
         ...ytdlpCookieArgs,
         target,
       ],
-      { signal, timeoutMs: 20_000, maxBytes: 64 * 1024 },
+      {
+        signal,
+        timeoutMs: 45_000,
+        maxBytes: maxRamBytes,
+      },
     );
-    const streamUrl = urlBuf.toString('utf-8').trim().split(/\r?\n/)[0]?.trim();
-    if (!streamUrl) {
-      throw new Error(`Não foi possível obter URL de stream para faixa longa: ${track.title}`);
+
+    if (audioBuffer.length === 0) {
+      throw new Error(`Buffer de áudio vazio retornado para a faixa: ${track.title}`);
     }
-    return { mode: 'direct-url', streamUrl };
-  }
 
-  // Baixa os pacotes WebM/Opus (formato 251) diretamente via stdout para a memória RAM.
-  const audioBuffer = await runProcessToBuffer(
-    ytdlpPath,
-    [
-      '-f',
-      '251/250/249/bestaudio[acodec=opus]/bestaudio',
-      '-o',
-      '-',
-      '--no-playlist',
-      '--no-warnings',
-      '--no-part',
-      '--concurrent-fragments',
-      '4',
-      ...ytdlpCookieArgs,
-      target,
-    ],
-    {
-      signal,
-      timeoutMs: 45_000,
-      maxBytes: maxRamBytes,
-    },
-  );
-
-  if (audioBuffer.length === 0) {
-    throw new Error(`Buffer de áudio vazio retornado para a faixa: ${track.title}`);
-  }
-
-  return {
-    mode: 'ram',
-    buffer: audioBuffer,
+    return {
+      mode: 'ram',
+      buffer: audioBuffer,
+    };
   };
+
+  try {
+    return await fetchTarget(initialTarget);
+  } catch (err) {
+    // shortcut: busca alternativa se o ID direto da playlist foi removido ou bloqueado na regiao
+    if (isHttp && !signal.aborted) {
+      const query =
+        track.artist && !track.title.toLowerCase().includes(track.artist.toLowerCase())
+          ? `ytsearch1:${track.artist} - ${track.title} audio`
+          : `ytsearch1:${track.title} audio`;
+      return await fetchTarget(query);
+    }
+    throw err;
+  }
 }
 
 /**

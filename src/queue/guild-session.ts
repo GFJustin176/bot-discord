@@ -168,60 +168,66 @@ export class GuildSession {
     if (this.destroyed) {
       return undefined;
     }
+    if (this.transitioning) {
+      return this.currentTrack;
+    }
 
     this.transitioning = true;
-    this.trackAbortController?.abort();
+    let isFirstAttempt = true;
 
     try {
-      let nextTrack: CompactTrack | undefined;
+      while (!this.destroyed) {
+        this.trackAbortController?.abort();
 
-      if (!forceSkipLoopTrack && this.queue.loopMode === 'track' && this.currentTrack) {
-        nextTrack = this.currentTrack;
-      } else {
-        if (this.queue.loopMode === 'queue' && this.currentTrack) {
-          this.queue.enqueue(this.currentTrack);
+        let nextTrack: CompactTrack | undefined;
+        if (isFirstAttempt && !forceSkipLoopTrack && this.queue.loopMode === 'track' && this.currentTrack) {
+          nextTrack = this.currentTrack;
+        } else {
+          if (this.queue.loopMode === 'queue' && this.currentTrack) {
+            this.queue.enqueue(this.currentTrack);
+          }
+          nextTrack = this.queue.dequeue();
         }
-        nextTrack = this.queue.dequeue();
+        isFirstAttempt = false;
+
+        if (!nextTrack) {
+          this.currentTrack = undefined;
+          this.prebufferCache.clearGuild(this.guildId);
+          return undefined;
+        }
+
+        this.currentTrack = nextTrack;
+        const controller = new AbortController();
+        this.trackAbortController = controller;
+
+        try {
+          // Carrega prioritariamente a faixa atual (N) e inicia a reprodução antes de disparar o pré-buffer de N+1.
+          const prebuffered = await this.prebufferCache.acquire(this.guildId, nextTrack);
+          if (controller.signal.aborted || this.destroyed) {
+            return this.currentTrack;
+          }
+
+          const resource = createLowJitterAudioResource(prebuffered, controller.signal);
+          if (this.customPlayResource) {
+            this.customPlayResource(resource);
+          } else {
+            this.player.play(resource);
+          }
+
+          // Com a faixa N já tocando na RAM, dispara em background o pré-carregamento da faixa N+1.
+          this.triggerNextTrackPrefetch();
+
+          return nextTrack;
+        } catch (err) {
+          logger.warn('GuildSession', `Falha ao reproduzir "${nextTrack.title}"; pulando para a próxima.`, {
+            error: err instanceof Error ? err.message : String(err),
+          });
+          if (this.queue.size === 0) {
+            this.currentTrack = undefined;
+            return undefined;
+          }
+        }
       }
-
-      if (!nextTrack) {
-        this.currentTrack = undefined;
-        this.prebufferCache.clearGuild(this.guildId);
-        // Nota: A VoiceConnection NÃO é destruída quando a fila acaba (permanece no canal enquanto houver humanos).
-        return undefined;
-      }
-
-      this.currentTrack = nextTrack;
-      const controller = new AbortController();
-      this.trackAbortController = controller;
-
-      // Carrega prioritariamente a faixa atual (N) e inicia a reprodução antes de disparar o pré-buffer de N+1.
-      const prebuffered = await this.prebufferCache.acquire(this.guildId, nextTrack);
-      if (controller.signal.aborted || this.destroyed) {
-        return this.currentTrack;
-      }
-
-      const resource = createLowJitterAudioResource(prebuffered, controller.signal);
-
-      if (this.customPlayResource) {
-        this.customPlayResource(resource);
-      } else {
-        this.player.play(resource);
-      }
-
-      // Com a faixa N já tocando na RAM, dispara em background o pré-carregamento da faixa N+1.
-      this.triggerNextTrackPrefetch();
-
-      return nextTrack;
-    } catch (err) {
-      logger.warn('GuildSession', `Falha ao reproduzir "${this.currentTrack?.title}"; pulando para a próxima.`, {
-        error: err instanceof Error ? err.message : String(err),
-      });
-      this.transitioning = false;
-      if (this.queue.size > 0 && !this.destroyed) {
-        return this.advanceToNextTrack(true);
-      }
-      this.currentTrack = undefined;
       return undefined;
     } finally {
       this.transitioning = false;

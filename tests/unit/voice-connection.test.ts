@@ -45,3 +45,4 @@ describe('VoiceConnection & Protocolo DAVE (Reprodução do Bug AbortError)', ()
     expect(destroySpy).toHaveBeenCalledTimes(1);
   });
 });
+
