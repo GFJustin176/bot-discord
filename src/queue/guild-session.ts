@@ -182,6 +182,7 @@ export class GuildSession {
 
     this.transitioning = true;
     let isFirstAttempt = true;
+    let consecutiveFailures = 0;
 
     try {
       while (!this.destroyed) {
@@ -222,6 +223,9 @@ export class GuildSession {
             this.player.play(resource);
           }
 
+          // Reinicia o contador de falhas consecutivas ao obter sucesso.
+          consecutiveFailures = 0;
+
           // Com a faixa N já tocando na RAM, dispara em background o pré-carregamento da faixa N+1.
           this.triggerNextTrackPrefetch();
 
@@ -237,9 +241,24 @@ export class GuildSession {
 
           return nextTrack;
         } catch (err) {
+          consecutiveFailures += 1;
           logger.warn('GuildSession', `Falha ao reproduzir "${nextTrack.title}"; pulando para a próxima.`, {
             error: err instanceof Error ? err.message : String(err),
+            consecutiveFailures,
           });
+
+          if (consecutiveFailures >= 3) {
+            this.currentTrack = undefined;
+            if (this.textChannel && 'send' in this.textChannel) {
+              void this.textChannel
+                .send(
+                  '⚠️ Reprodução interrompida após múltiplas falhas consecutivas de extração (bloqueio do YouTube ou erro de rede). As faixas restantes continuam salvas na fila.',
+                )
+                .catch(() => undefined);
+            }
+            return undefined;
+          }
+
           if (this.queue.size === 0) {
             this.currentTrack = undefined;
             return undefined;
