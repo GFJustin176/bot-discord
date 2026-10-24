@@ -43,7 +43,7 @@ export async function defaultYtDlpRamLoader(
   maxRamBytes: number,
   signal: AbortSignal,
 ): Promise<PrebufferedAudio> {
-  const { ytdlpPath } = getEnvConfig();
+  const { ytdlpPath, ytdlpCookieArgs } = getEnvConfig();
   const isHttp = track.locator.startsWith('http://') || track.locator.startsWith('https://');
   const target = isHttp ? track.locator : `ytsearch1:${track.locator}`;
 
@@ -51,7 +51,15 @@ export async function defaultYtDlpRamLoader(
   if (track.durationMs > MAX_RAM_TRACK_DURATION_MS) {
     const urlBuf = await runProcessToBuffer(
       ytdlpPath,
-      ['-f', '251/bestaudio[acodec=opus]/bestaudio', '-g', '--no-playlist', '--no-warnings', target],
+      [
+        '-f',
+        '251/bestaudio[acodec=opus]/bestaudio',
+        '-g',
+        '--no-playlist',
+        '--no-warnings',
+        ...ytdlpCookieArgs,
+        target,
+      ],
       { signal, timeoutMs: 20_000, maxBytes: 64 * 1024 },
     );
     const streamUrl = urlBuf.toString('utf-8').trim().split(/\r?\n/)[0]?.trim();
@@ -74,6 +82,7 @@ export async function defaultYtDlpRamLoader(
       '--no-part',
       '--concurrent-fragments',
       '4',
+      ...ytdlpCookieArgs,
       target,
     ],
     {

@@ -14,6 +14,7 @@ describe('parseEnvConfig', () => {
     expect(config.maxQueueSize).toBe(25_000);
     expect(config.maxRamBufferBytes).toBe(25 * 1024 * 1024);
     expect(config.spotifyHasCredentials).toBe(false);
+    expect(Array.isArray(config.ytdlpCookieArgs)).toBe(true);
   });
 
   it('ativa modo credenciado do Spotify apenas quando clientId e clientSecret estão presentes', () => {

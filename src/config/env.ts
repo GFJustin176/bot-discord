@@ -1,4 +1,5 @@
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
+import { resolve } from 'node:path';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -16,6 +17,7 @@ export interface AppEnvConfig {
   readonly spotifyHasCredentials: boolean;
   readonly ytdlpPath: string;
   readonly ffmpegPath: string;
+  readonly ytdlpCookieArgs: readonly string[];
 }
 
 const DEFAULT_MAX_QUEUE_SIZE = 25_000;
@@ -88,6 +90,16 @@ export function parseEnvConfig(rawEnv: Record<string, string | undefined>): AppE
     'ffmpeg',
   );
 
+  const cookiesCandidate = rawEnv.COOKIES_FILE?.trim() || resolve(process.cwd(), 'cookies.txt');
+  let ytdlpCookieArgs: readonly string[] = [];
+  try {
+    if (existsSync(cookiesCandidate) && statSync(cookiesCandidate).size > 0) {
+      ytdlpCookieArgs = ['--cookies', cookiesCandidate];
+    }
+  } catch {
+    ytdlpCookieArgs = [];
+  }
+
   return {
     discordToken,
     discordClientId,
@@ -100,6 +112,7 @@ export function parseEnvConfig(rawEnv: Record<string, string | undefined>): AppE
     spotifyHasCredentials,
     ytdlpPath,
     ffmpegPath,
+    ytdlpCookieArgs,
   };
 }
 

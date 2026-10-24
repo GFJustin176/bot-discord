@@ -2,6 +2,7 @@ node_modules/
 dist/
 tmp/
 .env
+*cookies*.txt
 *.log
 coverage/
 graphify-out/

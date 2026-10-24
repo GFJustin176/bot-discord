@@ -114,7 +114,7 @@ export async function resolveSingleYoutubeTrack(
   requestedBy?: string,
   signal?: AbortSignal,
 ): Promise<CompactTrack> {
-  const { ytdlpPath } = getEnvConfig();
+  const { ytdlpPath, ytdlpCookieArgs } = getEnvConfig();
   const isUrl = queryOrUrl.startsWith('http://') || queryOrUrl.startsWith('https://');
   const target = isUrl ? queryOrUrl : `ytsearch1:${queryOrUrl}`;
 
@@ -124,6 +124,7 @@ export async function resolveSingleYoutubeTrack(
     '--flat-playlist',
     '--no-warnings',
     '--geo-bypass',
+    ...ytdlpCookieArgs,
     target,
   ];
 
@@ -155,7 +156,7 @@ export function resolveYoutubePlaylistStream(
   maxTracks = 25_000,
   signal?: AbortSignal,
 ): AsyncGenerator<CompactTrack[], void, undefined> {
-  const { ytdlpPath } = getEnvConfig();
+  const { ytdlpPath, ytdlpCookieArgs } = getEnvConfig();
   const args = [
     '--flat-playlist',
     '--dump-json',
@@ -163,6 +164,7 @@ export function resolveYoutubePlaylistStream(
     '--ignore-errors',
     '--playlist-end',
     String(maxTracks),
+    ...ytdlpCookieArgs,
     playlistUrl,
   ];
 
