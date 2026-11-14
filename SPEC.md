@@ -172,8 +172,9 @@ export class TrackQueue {
 - **Sintaxe:**
   - Slash Command: `/autoplay [modo: enable | disable]`
   - Comando por Prefixo: `!autoplay [enable | disable]` (aceitando também sinônimos `on`, `off`, `ativar`, `desativar` ou alternância *toggle* caso nenhum argumento seja passado; atalhos: `ap`, `radio`).
-- **Estado por Servidor (`GuildSession`):**
-  - `autoplay: boolean` (inicia como `false` por padrão na sessão).
+- **Estado Persistente por Servidor (`GuildSession`):**
+  - `autoplay: boolean` inicia como `false` apenas na primeira vez em que o bot entra no servidor.
+  - Uma vez alterado via `/autoplay [enable|disable]` ou `!autoplay [enable|disable]`, o estado permanece **persistente para aquele servidor (`guildId`)** entre desconexões de voz (`/stop`, canal vazio) e reinicializações do processo (salvo em arquivo JSON local de preferências por guilda), só mudando quando o comando for executado novamente.
   - Ao ativar (`enable`) enquanto uma música já está tocando como faixa única (com fila vazia e sem ingestão de playlist em andamento), a sessão dispara imediatamente em background o preenchimento inicial de recomendações para que a faixa $N+1$ já entre no pré-buffer em RAM.
   - Exibido também nos comandos `/queue` (`!queue`) e `/np` (`!np`) para visibilidade do estado atual (`Autoplay: on | off`).
 

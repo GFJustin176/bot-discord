@@ -266,7 +266,7 @@
 **Description:** Integra o estado `autoplay` e o histórico circular (`playedHistory`, até 500 itens) na `GuildSession`, disparando o preenchimento automático de recomendações tanto quando uma música avulsa começa a tocar (ou quando o autoplay é ativado com fila vazia) quanto quando a última música de uma playlist entra em reprodução ou termina, mantendo o pré-buffer em RAM da faixa $N+1$. Adiciona o comando `/autoplay [modo: enable|disable]` e `!autoplay [enable|disable]` (e exibe o status em `/queue` e `/np`).
 
 **Acceptance criteria:**
-- [x] `GuildSession` expõe `autoplay` (`boolean`), `setAutoplay(enabled: boolean)` e registra faixas tocadas/enfileiradas no histórico da sessão para evitar repetição.
+- [x] `GuildSession` expõe `autoplay` (`boolean`), `setAutoplay(enabled: boolean)` (com persistência por `guildId` entre sessões/desconexões e reinicializações) e registra faixas tocadas/enfileiradas no histórico da sessão para evitar repetição.
 - [x] Quando `autoplay === true`, `loopMode === 'off'`, `queue.size === 0` e `!isIngestingPlaylist`, a sessão busca recomendações baseadas na faixa atual (música sozinha ou última música da playlist), enfileira o lote retornado e aciona `triggerNextTrackPrefetch()` para pré-carregar a $N+1$ na RAM.
 - [x] Enquanto uma playlist tiver faixas restantes na fila (`queue.size > 0`) ou estiver sendo ingerida (`isIngestingPlaylist === true`), o Autoplay aguarda até a última música da playlist.
 - [x] O comando `/autoplay [modo: enable|disable]` e `!autoplay [enable|disable]` (com suporte a `on`, `off`, `ativar`, `desativar` e toggle sem argumento) ativa/desativa o recurso e informa o estado no chat.
