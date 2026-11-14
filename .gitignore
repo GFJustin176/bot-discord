@@ -6,4 +6,4 @@ tmp/
 *.log
 coverage/
 graphify-out/
-
+GEMINI.md
