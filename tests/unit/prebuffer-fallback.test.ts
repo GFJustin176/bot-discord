@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { defaultYtDlpRamLoader } from '../../src/audio/prebuffer-cache.js';
 import type { CompactTrack } from '../../src/queue/track.js';
+import { type ProcessRunOptions, runProcessToBuffer } from '../../src/utils/process-runner.js';
 
 describe('defaultYtDlpRamLoader Fallback (Vídeo Indisponível na URL Direta)', () => {
   it('recorre à busca por texto quando a URL direta falha com erro de vídeo indisponível', async () => {
@@ -35,7 +36,7 @@ describe('defaultYtDlpRamLoader Fallback (Vídeo Indisponível na URL Direta)', 
     expect(result.mode).toBe('ram');
     expect(targetCalls).toHaveLength(2);
     expect(targetCalls[0]).toBe('https://music.youtube.com/watch?v=HydkjjDNTmY');
-    expect(targetCalls[1]).toContain('The Long Faces - Jane! audio');
+    expect(targetCalls[1]).toContain('The Long Faces - Jane!');
   });
 
   it('recorre à busca limpa sem sufixo audio quando busca do Spotify retorna buffer vazio', async () => {
@@ -72,5 +73,75 @@ describe('defaultYtDlpRamLoader Fallback (Vídeo Indisponível na URL Direta)', 
     expect(fallbackTarget).not.toContain('\u00a0');
     expect(fallbackTarget).not.toMatch(/\baudio$/);
     expect(fallbackTarget).toContain('BREGA ASSUMPTIONS');
+  });
+
+  it('filtra variantes (slowed, sped up, etc.) e faixa de duração na busca do Spotify', async () => {
+    const track: CompactTrack = {
+      id: 'sp_hypnotic',
+      source: 'spotify',
+      title: 'HYPNOTIC',
+      artist: 'ATLXS',
+      durationMs: 99_000,
+      locator: 'ATLXS - HYPNOTIC',
+    };
+
+    const calls: Array<{ args: readonly string[]; options?: ProcessRunOptions }> = [];
+    const fakeRunner = vi.fn(
+      async (_cmd: string, args: readonly string[], options?: ProcessRunOptions) => {
+        calls.push({ args, options });
+        return Buffer.from([0x1a, 0x45, 0xdf, 0xa3]);
+      },
+    );
+
+    const result = await defaultYtDlpRamLoader(
+      track,
+      25 * 1024 * 1024,
+      new AbortController().signal,
+      fakeRunner,
+    );
+
+    expect(result.mode).toBe('ram');
+    expect(calls).toHaveLength(1);
+    const args = calls[0]?.args ?? [];
+    expect(args[args.length - 1]).toBe('ytsearch3:ATLXS - HYPNOTIC');
+    expect(args).toContain('--max-downloads');
+    expect(args).toContain('--match-filter');
+    const filterExpr = args[args.indexOf('--match-filter') + 1] ?? '';
+    expect(filterExpr).toContain('duration >= 74 & duration <= 124');
+    expect(filterExpr).toContain('slowed');
+    expect(calls[0]?.options?.acceptedExitCodes).toEqual([0, 101]);
+  });
+
+  it('preserva termo de variante no filtro quando o título original o solicita explicitamente', async () => {
+    const track: CompactTrack = {
+      id: 'sp_slowed',
+      source: 'spotify',
+      title: 'HYPNOTIC (Super Slowed)',
+      artist: 'ATLXS',
+      durationMs: 118_000,
+      locator: 'ATLXS - HYPNOTIC (Super Slowed)',
+    };
+
+    const calls: readonly string[][] = [];
+    const fakeRunner = vi.fn(async (_cmd: string, args: readonly string[]) => {
+      (calls as string[][]).push([...args]);
+      return Buffer.from([0x1a, 0x45, 0xdf, 0xa3]);
+    });
+
+    await defaultYtDlpRamLoader(track, 25 * 1024 * 1024, new AbortController().signal, fakeRunner);
+
+    const args = calls[0] ?? [];
+    const filterExpr = args[args.indexOf('--match-filter') + 1] ?? '';
+    expect(filterExpr).not.toContain('slowed');
+    expect(filterExpr).toContain('duration >= 93 & duration <= 143');
+  });
+
+  it('runProcessToBuffer aceita códigos de saída configurados (como 101 do --max-downloads)', async () => {
+    const buf = await runProcessToBuffer(
+      process.execPath,
+      ['-e', 'process.stdout.write("ok"); process.exit(101);'],
+      { acceptedExitCodes: [0, 101] },
+    );
+    expect(buf.toString('utf-8')).toBe('ok');
   });
 });

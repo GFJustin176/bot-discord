@@ -6,6 +6,7 @@ export interface ProcessRunOptions {
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
   readonly maxBytes?: number;
+  readonly acceptedExitCodes?: readonly number[];
 }
 
 /**
@@ -102,7 +103,8 @@ export async function runProcessToBuffer(
       settled = true;
       cleanup();
 
-      if (code === 0) {
+      const acceptedExitCodes = options.acceptedExitCodes ?? [0];
+      if (code !== null && acceptedExitCodes.includes(code)) {
         resolve(Buffer.concat(stdoutChunks, totalBytes));
       } else {
         const stderrText = Buffer.concat(stderrChunks).toString('utf-8').trim();
@@ -169,4 +171,3 @@ export async function* streamProcessLines(
     killChild();
   }
 }
-

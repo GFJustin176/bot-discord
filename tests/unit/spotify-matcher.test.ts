@@ -13,9 +13,7 @@ describe('Spotify Hybrid Resolver & Lazy Matcher', () => {
       isrc: 'USQX91300106',
     });
 
-    expect(query).toBe(
-      'Daft Punk, Julian Casablancas - Instant Crush (feat. Julian Casablancas) audio',
-    );
+    expect(query).toBe('Daft Punk, Julian Casablancas - Instant Crush (feat. Julian Casablancas)');
   });
 
   it('cria CompactTrack lazy para o Spotify sem requisitar o YouTube antecipadamente', () => {
@@ -34,7 +32,7 @@ describe('Spotify Hybrid Resolver & Lazy Matcher', () => {
     expect(track.artist).toBe('Rick Astley');
     expect(track.title).toBe('Never Gonna Give You Up');
     expect(track.durationMs).toBe(213_573);
-    expect(track.locator).toBe('Rick Astley - Never Gonna Give You Up audio');
+    expect(track.locator).toBe('Rick Astley - Never Gonna Give You Up');
     expect(track.requestedBy).toBe('user_abc');
   });
 
@@ -94,7 +92,7 @@ describe('Spotify Hybrid Resolver & Lazy Matcher', () => {
 
     expect(track.artist).toBe('DJ NOLOTIL, Mc Gw');
     expect(track.title).toBe('BREGA ASSUMPTIONS');
-    expect(track.locator).toBe('DJ NOLOTIL, Mc Gw - BREGA ASSUMPTIONS audio');
+    expect(track.locator).toBe('DJ NOLOTIL, Mc Gw - BREGA ASSUMPTIONS');
     expect(track.locator).not.toContain('\u00a0');
   });
 });

@@ -32,6 +32,44 @@ interface GuildCacheState {
 }
 
 const MAX_RAM_TRACK_DURATION_MS = 15 * 60 * 1000;
+const DURATION_TOLERANCE_SEC = 25;
+const VARIANT_FILTER_TERMS = [
+  'slowed',
+  'sped up',
+  'nightcore',
+  '8d',
+  'karaoke',
+  'instrumental',
+] as const;
+
+interface SearchAttempt {
+  readonly target: string;
+  readonly matchFilter?: string;
+}
+
+function escapeRegexLiteral(term: string): string {
+  return term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildSearchMatchFilter(track: CompactTrack, strictDuration: boolean): string | undefined {
+  const titleLower = track.title.toLowerCase();
+  const excluded = VARIANT_FILTER_TERMS.filter(
+    (term) => !new RegExp(`\\b${escapeRegexLiteral(term)}\\b`, 'i').test(titleLower),
+  );
+
+  const clauses: string[] = [];
+  if (strictDuration && track.durationMs > 0) {
+    const durationSec = Math.round(track.durationMs / 1000);
+    const minSec = Math.max(1, durationSec - DURATION_TOLERANCE_SEC);
+    const maxSec = durationSec + DURATION_TOLERANCE_SEC;
+    clauses.push(`duration >= ${minSec} & duration <= ${maxSec}`);
+  }
+  if (excluded.length > 0) {
+    clauses.push(`title !~=? "(?i)\\\\b(${excluded.join('|')})\\\\b"`);
+  }
+
+  return clauses.length > 0 ? clauses.join(' & ') : undefined;
+}
 
 /**
  * Loader padrão que utiliza o yt-dlp para baixar o stream de áudio (priorizando formato 251 WebM/Opus)
@@ -46,9 +84,14 @@ export async function defaultYtDlpRamLoader(
 ): Promise<PrebufferedAudio> {
   const { ytdlpPath, ytdlpCookieArgs } = getEnvConfig();
   const isHttp = track.locator.startsWith('http://') || track.locator.startsWith('https://');
-  const initialTarget = isHttp ? track.locator : `ytsearch1:${track.locator}`;
 
-  const fetchTarget = async (target: string): Promise<PrebufferedAudio> => {
+  const fetchTarget = async ({ target, matchFilter }: SearchAttempt): Promise<PrebufferedAudio> => {
+    const isMultiSearch = target.startsWith('ytsearch') && !target.startsWith('ytsearch1:');
+    const playlistArgs = isMultiSearch ? ['--max-downloads', '1'] : ['--no-playlist'];
+    const filterArgs = matchFilter ? ['--match-filter', matchFilter] : [];
+    // yt-dlp encerra com código 101 (MaxDownloadsReached) ao concluir o download com --max-downloads.
+    const acceptedExitCodes = isMultiSearch ? [0, 101] : [0];
+
     // Faixas muito longas (> 15 min) usam URL de stream para evitar alocar dezenas de MB na RAM.
     if (track.durationMs > MAX_RAM_TRACK_DURATION_MS) {
       const urlBuf = await processRunner(
@@ -57,12 +100,13 @@ export async function defaultYtDlpRamLoader(
           '-f',
           '251/bestaudio[acodec=opus]/bestaudio',
           '-g',
-          '--no-playlist',
+          ...playlistArgs,
+          ...filterArgs,
           '--no-warnings',
           ...ytdlpCookieArgs,
           target,
         ],
-        { signal, timeoutMs: 20_000, maxBytes: 64 * 1024 },
+        { signal, timeoutMs: 20_000, maxBytes: 64 * 1024, acceptedExitCodes },
       );
       const streamUrl = urlBuf.toString('utf-8').trim().split(/\r?\n/)[0]?.trim();
       if (!streamUrl) {
@@ -79,7 +123,8 @@ export async function defaultYtDlpRamLoader(
         '251/250/249/bestaudio[acodec=opus]/bestaudio',
         '-o',
         '-',
-        '--no-playlist',
+        ...playlistArgs,
+        ...filterArgs,
         '--no-warnings',
         '--no-part',
         '--concurrent-fragments',
@@ -91,6 +136,7 @@ export async function defaultYtDlpRamLoader(
         signal,
         timeoutMs: 45_000,
         maxBytes: maxRamBytes,
+        acceptedExitCodes,
       },
     );
 
@@ -104,55 +150,64 @@ export async function defaultYtDlpRamLoader(
     };
   };
 
-  try {
-    return await fetchTarget(initialTarget);
-  } catch (err) {
-    if (signal.aborted) {
-      throw err;
-    }
+  const cleanArtist = (track.artist ?? '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const cleanTitle = track.title
+    .replace(/\u00a0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const cleanLocator = track.locator
+    .replace(/\u00a0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const hasDistinctArtist =
+    cleanArtist.length > 0 && !cleanTitle.toLowerCase().includes(cleanArtist.toLowerCase());
 
-    const cleanArtist = (track.artist ?? '')
-      .replace(/\u00a0/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-    const cleanTitle = track.title
-      .replace(/\u00a0/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-    const hasDistinctArtist =
-      cleanArtist.length > 0 && !cleanTitle.toLowerCase().includes(cleanArtist.toLowerCase());
+  const strictFilter = buildSearchMatchFilter(track, true);
+  const variantFilter = buildSearchMatchFilter(track, false);
+  const baseQuery = hasDistinctArtist ? `${cleanArtist} - ${cleanTitle}` : cleanTitle;
+  const altQuery = hasDistinctArtist ? `${cleanArtist} ${cleanTitle}` : cleanTitle;
 
-    const fallbackTargets: string[] = [];
-    if (isHttp) {
-      // Busca alternativa caso a URL direta tenha sido removida ou bloqueada na região.
-      fallbackTargets.push(
-        hasDistinctArtist
-          ? `ytsearch1:${cleanArtist} - ${cleanTitle} audio`
-          : `ytsearch1:${cleanTitle} audio`,
-      );
+  const attempts: SearchAttempt[] = [];
+  const pushUniqueAttempt = (attempt: SearchAttempt): void => {
+    if (
+      !attempts.some((a) => a.target === attempt.target && a.matchFilter === attempt.matchFilter)
+    ) {
+      attempts.push(attempt);
     }
+  };
 
-    // Recorre à busca sem o sufixo "audio" quando a consulta estrita não retorna correspondência.
-    const cleanSearch = hasDistinctArtist
-      ? `ytsearch1:${cleanArtist} ${cleanTitle}`
-      : `ytsearch1:${cleanTitle}`;
-    if (cleanSearch !== initialTarget && !fallbackTargets.includes(cleanSearch)) {
-      fallbackTargets.push(cleanSearch);
-    }
-
-    let lastErr: unknown = err;
-    for (const target of fallbackTargets) {
-      try {
-        return await fetchTarget(target);
-      } catch (fallbackErr) {
-        if (signal.aborted) {
-          throw fallbackErr;
-        }
-        lastErr = fallbackErr;
-      }
-    }
-    throw lastErr;
+  if (isHttp) {
+    pushUniqueAttempt({ target: track.locator });
+    pushUniqueAttempt({ target: `ytsearch3:${baseQuery}`, matchFilter: strictFilter });
+  } else {
+    pushUniqueAttempt({ target: `ytsearch3:${cleanLocator}`, matchFilter: strictFilter });
   }
+
+  if (strictFilter && variantFilter && strictFilter !== variantFilter) {
+    pushUniqueAttempt({
+      target: `ytsearch3:${isHttp ? baseQuery : cleanLocator}`,
+      matchFilter: variantFilter,
+    });
+  }
+
+  // Fallback final sem filtro restritivo caso nenhuma correspondência atenda aos critérios.
+  pushUniqueAttempt({ target: `ytsearch1:${altQuery}` });
+
+  let lastErr: unknown;
+  for (const attempt of attempts) {
+    try {
+      return await fetchTarget(attempt);
+    } catch (err) {
+      if (signal.aborted) {
+        throw err;
+      }
+      lastErr = err;
+    }
+  }
+  throw lastErr;
 }
 
 /**

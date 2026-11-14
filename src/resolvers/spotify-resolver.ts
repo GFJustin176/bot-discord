@@ -38,7 +38,7 @@ export function buildSpotifyLazySearchQuery(meta: {
       .map(normalizeSpotifyText)
       .filter((a) => a.length > 0)
       .join(', ') || 'Unknown Artist';
-  return `${artistStr} - ${normalizeSpotifyText(meta.title)} audio`;
+  return `${artistStr} - ${normalizeSpotifyText(meta.title)}`;
 }
 
 /**
