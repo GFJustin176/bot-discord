@@ -234,3 +234,63 @@
 - [x] Typecheck and build pass (`npm run build`)
 - [x] Core user flow works end-to-end (Slash + Prefix, 25k queue, Pre-buffering N/N+1 in RAM, Auto-leave only on empty voice channel)
 - [x] Review with human
+
+---
+
+## Task 9: Resolvedor de Autoplay via YouTube Radio Mix (`RD<videoId>`) e Deduplicação de Histórico
+
+**Description:** Implementa `src/resolvers/autoplay-resolver.ts` para extrair músicas relacionadas pelo estilo/gênero da faixa-semente usando a playlist algorítmica de Rádio do YouTube (`https://www.youtube.com/watch?v=<videoId>&list=RD<videoId>`) via `yt-dlp --flat-playlist --dump-json --playlist-end 15`. Suporta sementes do YouTube, YouTube Music e Spotify (resolvendo o `videoId` correspondente via busca quando a semente é do Spotify) e aplica deduplicação por ID e chave normalizada (`artista + título`) contra o histórico da sessão.
+
+**Acceptance criteria:**
+- [ ] Extrai o `videoId` diretamente para faixas `youtube`/`ytmusic` e resolve o `videoId` via busca para faixas `spotify`.
+- [ ] Executa o `yt-dlp` com `--flat-playlist --dump-json --playlist-end 15` na URL `RD<videoId>` com suporte a `AbortSignal`.
+- [ ] Filtra a própria faixa-semente e qualquer faixa cujo `id`, `videoId` ou chave normalizada (`artista + título`) já conste no histórico da sessão (`playedHistory`), retornando até `limit` (padrão 5) faixas inéditas marcadas com `requestedBy: 'Autoplay'`.
+
+**Verification:**
+- [ ] Tests pass: `npx vitest run tests/unit/autoplay-resolver.test.ts`
+- [ ] Build succeeds: `npm run build`
+- [ ] Manual check: Verificar que faixas repetidas ou variações do mesmo título/artista são filtradas.
+
+**Dependencies:** Task 3, Task 4
+
+**Files likely touched:**
+- `src/resolvers/autoplay-resolver.ts`
+- `tests/unit/autoplay-resolver.test.ts`
+
+**Estimated scope:** Small: 1-2 files
+
+---
+
+## Task 10: Integração do Ciclo de Autoplay na `GuildSession` e Comando `/autoplay` (`!autoplay [enable/disable]`)
+
+**Description:** Integra o estado `autoplay` e o histórico circular (`playedHistory`, até 500 itens) na `GuildSession`, disparando o preenchimento automático de recomendações tanto quando uma música avulsa começa a tocar (ou quando o autoplay é ativado com fila vazia) quanto quando a última música de uma playlist entra em reprodução ou termina, mantendo o pré-buffer em RAM da faixa $N+1$. Adiciona o comando `/autoplay [modo: enable|disable]` e `!autoplay [enable|disable]` (e exibe o status em `/queue` e `/np`).
+
+**Acceptance criteria:**
+- [ ] `GuildSession` expõe `autoplay` (`boolean`), `setAutoplay(enabled: boolean)` e registra faixas tocadas/enfileiradas no histórico da sessão para evitar repetição.
+- [ ] Quando `autoplay === true`, `loopMode === 'off'`, `queue.size === 0` e `!isIngestingPlaylist`, a sessão busca recomendações baseadas na faixa atual (música sozinha ou última música da playlist), enfileira o lote retornado e aciona `triggerNextTrackPrefetch()` para pré-carregar a $N+1$ na RAM.
+- [ ] Enquanto uma playlist tiver faixas restantes na fila (`queue.size > 0`) ou estiver sendo ingerida (`isIngestingPlaylist === true`), o Autoplay aguarda até a última música da playlist.
+- [ ] O comando `/autoplay [modo: enable|disable]` e `!autoplay [enable|disable]` (com suporte a `on`, `off`, `ativar`, `desativar` e toggle sem argumento) ativa/desativa o recurso e informa o estado no chat.
+
+**Verification:**
+- [ ] Tests pass: `npx vitest run tests/unit/guild-session.test.ts tests/unit/command-parser.test.ts`
+- [ ] Build succeeds: `npm run build`
+- [ ] Manual check: Testar `!autoplay enable` com uma música avulsa e com o fim de uma playlist curta.
+
+**Dependencies:** Task 6, Task 7, Task 9
+
+**Files likely touched:**
+- `src/queue/guild-session.ts`
+- `src/bot/commands/index.ts`
+- `src/bot/commands/queue-commands.ts`
+- `tests/unit/guild-session.test.ts`
+- `tests/unit/command-parser.test.ts`
+
+**Estimated scope:** Medium: 3-5 files
+
+---
+
+## Checkpoint: After Tasks 9-10 (Autoplay Complete)
+- [ ] All tests pass (`npm test -- --run`)
+- [ ] Application builds and lints without errors (`npm run build && npm run lint`)
+- [ ] Slash commands updated (`npm run deploy:commands`)
+- [ ] Review with human

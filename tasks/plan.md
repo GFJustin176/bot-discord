@@ -12,6 +12,7 @@ Implementação de um bot de música pessoal para Discord em Node.js 24 e TypeSc
 - **Pré-Buffering Local ($N$ e $N+1$) + Passthrough WebM/Opus:** O `yt-dlp` baixa a faixa atual ($N$) e pré-carrega a próxima ($N+1$) em `tmp/audio-cache/`. O `ffmpeg` lê a partir do arquivo local (e não de um socket HTTP sujeito a *throttling*), enviando pacotes Opus (48kHz estéreo, formato `251` com `-c:a copy` sempre que compatível) em cadência constante para o `@discordjs/voice`.
 - **Adaptador Unificado de Comandos (`CommandContext`):** Centraliza a execução dos comandos para que `/play` (Slash Command) e `!play` (mensagem com prefixo) compartilhem exatamente a mesma implementação.
 - **Política Estrita de Desconexão (`voiceStateUpdate`):** O término da fila mantém o bot conectado no canal de voz; o encerramento automático da sessão ocorre única e exclusivamente quando o número de membros humanos no canal de voz chega a zero.
+- **Autoplay via YouTube Radio Mix (`RD<videoId>`) com Deduplicação:** Utiliza o mix algorítmico nativo do YouTube (`list=RD<videoId>`) via `yt-dlp --flat-playlist --dump-json --playlist-end 15` sem adicionar dependências externas. Quando a última faixa é do Spotify (`sp_...`), resolve o `videoId` correspondente via busca antes de consultar o mix, filtrando faixas já reproduzidas na sessão (`playedHistory` circular de até 500 entradas).
 
 ## Dependency Graph
 
@@ -22,13 +23,15 @@ Configuração & Ambiente (src/config/env.ts)
     │       │
     │       ├── Classificador & Resolver YouTube/YTM (src/resolvers/url-classifier.ts, youtube-resolver.ts)
     │       │       │
-    │       │       └── Resolver Híbrido Spotify (src/resolvers/spotify-resolver.ts)
+    │       │       ├── Resolver Híbrido Spotify (src/resolvers/spotify-resolver.ts)
+    │       │       │
+    │       │       └── Resolver de Autoplay Radio Mix (src/resolvers/autoplay-resolver.ts)
     │       │
     │       └── Pré-Buffer Local & Pipeline Opus (src/audio/prebuffer-cache.ts, stream-pipeline.ts, voice-manager.ts)
     │               │
     ├── Fila O(1) de 25.000 Faixas (src/queue/track.ts, ring-queue.ts)
     │               │
-    └───────────────┴── Orquestrador de Sessão (src/queue/guild-session.ts)
+    └───────────────┴── Orquestrador de Sessão + Autoplay (src/queue/guild-session.ts)
                                 │
                                 └── Contexto Híbrido & Comandos (src/bot/command-context.ts, commands/*)
                                         │
@@ -75,9 +78,17 @@ A lista detalhada de tarefas com critérios de aceitação, comandos de verifica
 - [x] Task 7: Abstração Híbrida de Comandos (Slash + Prefixo) e Handlers de Música
 - [x] Task 8: Cliente Discord, Auto-Leave em Canal Vazio e Ponto de Entrada
 
-### Checkpoint: Complete
-- [x] Todos os critérios de aceitação de [SPEC.md](file:///d:/!!!_projetos/ws-vsCode/bot-discord/SPEC.md) atendidos
+### Checkpoint: Complete (Core Engine)
+- [x] Todos os critérios de aceitação iniciais de [SPEC.md](file:///d:/!!!_projetos/ws-vsCode/bot-discord/SPEC.md) atendidos
 - [x] Suíte completa de testes, linter e build passando (`npm run build && npm test -- --run`)
+
+### Phase 5: Autoplay (Rádio Dinâmica Baseada na Última Faixa)
+- [ ] Task 9: Resolvedor de Autoplay via YouTube Radio Mix (`RD<videoId>`) e Deduplicação de Histórico
+- [ ] Task 10: Integração do Ciclo de Autoplay na `GuildSession` e Comando `/autoplay` (`!autoplay [enable/disable]`)
+
+### Checkpoint: Autoplay Complete
+- [ ] Testes unitários de `autoplay-resolver`, `guild-session` (música avulsa + fim de playlist) e `command-parser` passando
+- [ ] Build TypeScript e linter limpos (`npm run build && npm test -- --run && npm run lint`)
 
 ## Risks and Mitigations
 
