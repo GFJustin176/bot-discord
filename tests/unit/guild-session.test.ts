@@ -1,7 +1,24 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { PrebufferCache } from '../../src/audio/prebuffer-cache.js';
+import {
+  type GuildAutoplayStore,
+  createGuildAutoplayStore,
+} from '../../src/config/guild-settings.js';
 import { GuildSession } from '../../src/queue/guild-session.js';
 import type { CompactTrack } from '../../src/queue/track.js';
+
+function createMemoryAutoplayStore(): GuildAutoplayStore {
+  const map = new Map<string, boolean>();
+  return {
+    getAutoplay: (guildId) => map.get(guildId) ?? false,
+    setAutoplay: (guildId, enabled) => {
+      map.set(guildId, enabled);
+    },
+  };
+}
 
 function makeTrack(id: string): CompactTrack {
   return {
@@ -71,7 +88,14 @@ describe('GuildSession (Orquestração de Fila, Pré-Buffer N/N+1 e Permanência
 
     const recommended = makeTrack('rec_1');
     const autoplaySpy = vi.fn(async () => [recommended]);
-    const session = new GuildSession('guild_ap_single', 25_000, cache, vi.fn(), autoplaySpy);
+    const session = new GuildSession(
+      'guild_ap_single',
+      25_000,
+      cache,
+      vi.fn(),
+      autoplaySpy,
+      createMemoryAutoplayStore(),
+    );
     session.setAutoplay(true);
 
     await session.enqueueAndPlay([makeTrack('single_1')]);
@@ -92,7 +116,14 @@ describe('GuildSession (Orquestração de Fila, Pré-Buffer N/N+1 e Permanência
     }));
 
     const autoplaySpy = vi.fn(async (seed: CompactTrack) => [makeTrack(`after_${seed.id}`)]);
-    const session = new GuildSession('guild_ap_playlist', 25_000, cache, vi.fn(), autoplaySpy);
+    const session = new GuildSession(
+      'guild_ap_playlist',
+      25_000,
+      cache,
+      vi.fn(),
+      autoplaySpy,
+      createMemoryAutoplayStore(),
+    );
     session.setAutoplay(true);
 
     await session.enqueueAndPlay([makeTrack('pl_1'), makeTrack('pl_2')]);
@@ -119,7 +150,14 @@ describe('GuildSession (Orquestração de Fila, Pré-Buffer N/N+1 e Permanência
     }));
 
     const autoplaySpy = vi.fn(async () => [makeTrack('rec_loop')]);
-    const session = new GuildSession('guild_ap_loop', 25_000, cache, vi.fn(), autoplaySpy);
+    const session = new GuildSession(
+      'guild_ap_loop',
+      25_000,
+      cache,
+      vi.fn(),
+      autoplaySpy,
+      createMemoryAutoplayStore(),
+    );
     session.queue.setLoopMode('track');
     session.setAutoplay(true);
 
@@ -135,5 +173,79 @@ describe('GuildSession (Orquestração de Fila, Pré-Buffer N/N+1 e Permanência
     expect(autoplaySpy).toHaveBeenCalledTimes(1);
     const callOpts = autoplaySpy.mock.calls[0]?.[1];
     expect(callOpts?.excludeIds?.has('base')).toBe(true);
+  });
+
+  it('persiste o estado de autoplay por servidor após desconexão e reinicialização', () => {
+    const tempDir = mkdtempSync(path.join(tmpdir(), 'bot-discord-settings-'));
+    const settingsFile = path.join(tempDir, 'guild-settings.json');
+
+    try {
+      const store1 = createGuildAutoplayStore(settingsFile);
+      const cache = new PrebufferCache(25 * 1024 * 1024, async () => ({
+        mode: 'ram',
+        buffer: Buffer.from([0x1a, 0x45, 0xdf, 0xa3]),
+      }));
+
+      // Ao entrar pela primeira vez no servidor, autoplay deve iniciar desativado.
+      const session1 = new GuildSession(
+        'guild_persist_1',
+        25_000,
+        cache,
+        vi.fn(),
+        undefined,
+        store1,
+      );
+      const otherGuild = new GuildSession(
+        'guild_persist_2',
+        25_000,
+        cache,
+        vi.fn(),
+        undefined,
+        store1,
+      );
+      expect(session1.autoplay).toBe(false);
+      expect(otherGuild.autoplay).toBe(false);
+
+      // Ao ativar e encerrar a sessão (stop / canal vazio), a preferência deve persistir.
+      session1.setAutoplay(true);
+      session1.stopAndDisconnect();
+
+      // Simula nova sessão após reconexão ou reinício completo do bot lendo do mesmo arquivo.
+      const store2 = createGuildAutoplayStore(settingsFile);
+      const sessionAfterRestart = new GuildSession(
+        'guild_persist_1',
+        25_000,
+        cache,
+        vi.fn(),
+        undefined,
+        store2,
+      );
+      const otherAfterRestart = new GuildSession(
+        'guild_persist_2',
+        25_000,
+        cache,
+        vi.fn(),
+        undefined,
+        store2,
+      );
+
+      expect(sessionAfterRestart.autoplay).toBe(true);
+      expect(otherAfterRestart.autoplay).toBe(false);
+
+      // Ao desativar explicitamente, a nova preferência também persiste.
+      sessionAfterRestart.setAutoplay(false);
+      const store3 = createGuildAutoplayStore(settingsFile);
+      const sessionDisabled = new GuildSession(
+        'guild_persist_1',
+        25_000,
+        cache,
+        vi.fn(),
+        undefined,
+        store3,
+      );
+      expect(sessionDisabled.autoplay).toBe(false);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });

@@ -12,6 +12,7 @@ import type { TextBasedChannel } from 'discord.js';
 import { PrebufferCache } from '../audio/prebuffer-cache.js';
 import { createLowJitterAudioResource } from '../audio/stream-pipeline.js';
 import { getEnvConfig } from '../config/env.js';
+import { type GuildAutoplayStore, defaultGuildAutoplayStore } from '../config/guild-settings.js';
 import {
   type AutoplayOptions,
   buildTrackDedupeKey,
@@ -43,6 +44,7 @@ export class GuildSession {
   private readonly prebufferCache: PrebufferCache;
   private readonly customPlayResource?: PlayResourceFn;
   private readonly autoplayFetcher: AutoplayRecommendationFn;
+  private readonly autoplayStore: GuildAutoplayStore;
 
   private currentTrack?: CompactTrack;
   private lastPlayedTrack?: CompactTrack;
@@ -53,7 +55,7 @@ export class GuildSession {
   private readonly historyIds = new Set<string>();
   private readonly historyKeys = new Set<string>();
   private readonly historyOrder: Array<{ readonly id: string; readonly key: string }> = [];
-  private autoplayEnabled = false;
+  private autoplayEnabled: boolean;
   private ingestingPlaylistCount = 0;
   private transitioning = false;
   private destroyed = false;
@@ -65,12 +67,15 @@ export class GuildSession {
     prebufferCache?: PrebufferCache,
     customPlayResource?: PlayResourceFn,
     autoplayFetcher?: AutoplayRecommendationFn,
+    autoplayStore?: GuildAutoplayStore,
   ) {
     this.guildId = guildId;
     this.queue = new TrackQueue(maxQueueSize);
     this.prebufferCache = prebufferCache ?? new PrebufferCache();
     this.customPlayResource = customPlayResource;
     this.autoplayFetcher = autoplayFetcher ?? fetchAutoplayRecommendations;
+    this.autoplayStore = autoplayStore ?? defaultGuildAutoplayStore;
+    this.autoplayEnabled = this.autoplayStore.getAutoplay(guildId);
 
     this.player = createAudioPlayer({
       behaviors: {
@@ -118,9 +123,10 @@ export class GuildSession {
     return this.autoplayEnabled;
   }
 
-  // Ativa ou desativa o modo Autoplay e preenche recomendações imediatas se aplicável.
+  // Ativa ou desativa o modo Autoplay de forma persistente para o servidor e preenche recomendações imediatas se aplicável.
   public setAutoplay(enabled: boolean): void {
     this.autoplayEnabled = enabled;
+    this.autoplayStore.setAutoplay(this.guildId, enabled);
     if (!enabled) {
       this.autoplayAbortController?.abort();
       return;
