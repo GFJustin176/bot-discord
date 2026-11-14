@@ -1,3 +1,4 @@
+import { defaultGuildAutoplayStore } from '../../config/guild-settings.js';
 import { getGuildSession, getOrCreateGuildSession } from '../../queue/guild-session.js';
 import {
   AUTOPLAY_BLACKLIST_CATEGORIES,
@@ -304,5 +305,53 @@ export async function handleBlacklistCommand(ctx: CommandContext): Promise<void>
 
   await ctx.reply(
     `Categoria **${label}** (\`${parsed.category}\`) ${stateText} blacklist do **Autoplay**.\nAtivas: ${activeSummary}.`,
+  );
+}
+
+// Formata o resumo das configurações persistentes do servidor (Autoplay e blacklist).
+export function buildGuildConfigReport(state: {
+  readonly autoplay: boolean;
+  readonly blacklist: readonly AutoplayBlacklistCategory[];
+  readonly loopMode?: LoopMode;
+  readonly queueSize?: number;
+  readonly nowPlayingTitle?: string;
+}): string {
+  const autoplayText = state.autoplay ? '**Ativado** (`enable`)' : '**Desativado** (`disable`)';
+  const blacklistText =
+    state.blacklist.length > 0
+      ? state.blacklist.map((c) => `\`${c}\` (${AUTOPLAY_BLACKLIST_LABELS[c]})`).join(', ')
+      : 'Nenhuma categoria bloqueada';
+
+  const lines = [
+    '**Configurações e Status do Servidor**',
+    `• **Autoplay:** ${autoplayText}`,
+    `• **Blacklist do Autoplay:** ${blacklistText}`,
+  ];
+
+  if (state.nowPlayingTitle) {
+    lines.push(
+      `• **Sessão ativa:** Tocando **${state.nowPlayingTitle}** | Fila: \`${state.queueSize ?? 0}\` | Loop: \`${state.loopMode ?? 'off'}\``,
+    );
+  }
+
+  return lines.join('\n');
+}
+
+// Exibe o status de Autoplay e blacklist configurados no servidor.
+export async function handleConfigCommand(ctx: CommandContext): Promise<void> {
+  const session = getGuildSession(ctx.guildId);
+  const autoplay = session ? session.autoplay : defaultGuildAutoplayStore.getAutoplay(ctx.guildId);
+  const blacklist = session
+    ? session.blacklist
+    : defaultGuildAutoplayStore.getAutoplayBlacklist(ctx.guildId);
+
+  await ctx.reply(
+    buildGuildConfigReport({
+      autoplay,
+      blacklist,
+      loopMode: session?.queue.loopMode,
+      queueSize: session?.queue.size,
+      nowPlayingTitle: session?.nowPlaying?.title,
+    }),
   );
 }

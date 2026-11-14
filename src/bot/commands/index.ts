@@ -2,6 +2,7 @@ import {
   type RESTPostAPIChatInputApplicationCommandsJSONBody,
   SlashCommandBuilder,
 } from 'discord.js';
+import { getEnvConfig } from '../../config/env.js';
 import type { CommandContext } from '../command-context.js';
 import {
   handlePauseCommand,
@@ -15,6 +16,7 @@ import {
   handleAutoplayCommand,
   handleBlacklistCommand,
   handleClearCommand,
+  handleConfigCommand,
   handleLoopCommand,
   handleNowPlayingCommand,
   handleQueueCommand,
@@ -63,11 +65,43 @@ const ALIAS_MAP: Record<string, string> = {
   radio: 'autoplay',
   blacklist: 'blacklist',
   bl: 'blacklist',
+  config: 'config',
+  status: 'config',
+  cfg: 'config',
+  configuracao: 'config',
+  help: 'help',
+  ajuda: 'help',
+  comandos: 'help',
+  commands: 'help',
+  h: 'help',
 };
 
 // Normaliza o nome do comando ou atalho em português/inglês para o identificador canônico.
 export function normalizeCommandAlias(input: string): string | undefined {
   return ALIAS_MAP[input.toLowerCase().trim()];
+}
+
+// Monta a lista de comandos e atalhos a partir das definições oficiais dos Slash Commands.
+export function formatCommandsHelp(prefix = getEnvConfig().commandPrefix): string {
+  const aliasesByCommand = new Map<string, string[]>();
+  for (const [alias, canonical] of Object.entries(ALIAS_MAP)) {
+    if (alias === canonical) continue;
+    const list = aliasesByCommand.get(canonical) ?? [];
+    list.push(`${prefix}${alias}`);
+    aliasesByCommand.set(canonical, list);
+  }
+
+  const lines = buildSlashCommandsJson().map((cmd) => {
+    const aliases = aliasesByCommand.get(cmd.name);
+    const aliasText = aliases && aliases.length > 0 ? ` (${aliases.join(', ')})` : '';
+    return `• \`/${cmd.name}\`${aliasText} — ${cmd.description}`;
+  });
+
+  return [`**Comandos Disponíveis** (prefixo \`${prefix}\` ou \`/\`):`, ...lines].join('\n');
+}
+
+async function handleHelpCommand(ctx: CommandContext): Promise<void> {
+  await ctx.reply(formatCommandsHelp());
 }
 
 const COMMAND_HANDLERS: Record<string, CommandHandler> = {
@@ -84,6 +118,8 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   clear: handleClearCommand,
   autoplay: handleAutoplayCommand,
   blacklist: handleBlacklistCommand,
+  config: handleConfigCommand,
+  help: handleHelpCommand,
 };
 
 // Obtém o handler correspondente a um comando Slash ou Prefixo.
@@ -196,5 +232,11 @@ export function buildSlashCommandsJson(): RESTPostAPIChatInputApplicationCommand
             },
           ),
       ),
+    new SlashCommandBuilder()
+      .setName('config')
+      .setDescription('Mostra se o Autoplay está ativado e as categorias na blacklist do servidor'),
+    new SlashCommandBuilder()
+      .setName('help')
+      .setDescription('Lista todos os comandos disponíveis com uma breve explicação'),
   ].map((cmd) => cmd.toJSON());
 }

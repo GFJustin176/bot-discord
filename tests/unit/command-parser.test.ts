@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { parsePrefixMessage } from '../../src/bot/command-context.js';
-import { buildSlashCommandsJson, normalizeCommandAlias } from '../../src/bot/commands/index.js';
 import {
+  buildSlashCommandsJson,
+  formatCommandsHelp,
+  normalizeCommandAlias,
+} from '../../src/bot/commands/index.js';
+import {
+  buildGuildConfigReport,
   parseAutoplayModeArg,
   parseBlacklistCommandArgs,
 } from '../../src/bot/commands/queue-commands.js';
@@ -94,5 +99,40 @@ describe('parsePrefixMessage & normalizeCommandAlias', () => {
       kind: 'invalid-category',
       rawInput: 'rock',
     });
+  });
+
+  it('exibe status/configuração do servidor e lista completa de comandos no help', () => {
+    expect(normalizeCommandAlias('config')).toBe('config');
+    expect(normalizeCommandAlias('status')).toBe('config');
+    expect(normalizeCommandAlias('cfg')).toBe('config');
+    expect(normalizeCommandAlias('help')).toBe('help');
+    expect(normalizeCommandAlias('ajuda')).toBe('help');
+    expect(normalizeCommandAlias('comandos')).toBe('help');
+    expect(normalizeCommandAlias('h')).toBe('help');
+
+    const slashNames = buildSlashCommandsJson().map((c) => c.name);
+    expect(slashNames).toContain('config');
+    expect(slashNames).toContain('help');
+
+    const emptyReport = buildGuildConfigReport({
+      autoplay: false,
+      blacklist: [],
+    });
+    expect(emptyReport).toContain('Desativado');
+    expect(emptyReport).toContain('Nenhuma');
+
+    const activeReport = buildGuildConfigReport({
+      autoplay: true,
+      blacklist: ['slowed', 'speed_up_intensificado'],
+    });
+    expect(activeReport).toContain('Ativado');
+    expect(activeReport).toContain('slowed');
+    expect(activeReport).toContain('speed_up_intensificado');
+
+    const helpText = formatCommandsHelp('!');
+    for (const cmd of slashNames) {
+      expect(helpText).toContain(`/${cmd}`);
+    }
+    expect(helpText.length).toBeLessThanOrEqual(2000);
   });
 });
