@@ -1,5 +1,5 @@
 import { getEnvConfig } from '../config/env.js';
-import type { CompactTrack } from '../queue/track.js';
+import { type CompactTrack, buildVariantMatchRules } from '../queue/track.js';
 import { logger } from '../utils/logger.js';
 import { runProcessToBuffer } from '../utils/process-runner.js';
 
@@ -33,39 +33,28 @@ interface GuildCacheState {
 
 const MAX_RAM_TRACK_DURATION_MS = 15 * 60 * 1000;
 const DURATION_TOLERANCE_SEC = 25;
-const VARIANT_FILTER_TERMS = [
-  'slowed',
-  'sped up',
-  'nightcore',
-  '8d',
-  'karaoke',
-  'instrumental',
-] as const;
 
 interface SearchAttempt {
   readonly target: string;
   readonly matchFilter?: string;
 }
 
-function escapeRegexLiteral(term: string): string {
-  return term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 function buildSearchMatchFilter(track: CompactTrack, strictDuration: boolean): string | undefined {
-  const titleLower = track.title.toLowerCase();
-  const excluded = VARIANT_FILTER_TERMS.filter(
-    (term) => !new RegExp(`\\b${escapeRegexLiteral(term)}\\b`, 'i').test(titleLower),
-  );
-
+  const rules = buildVariantMatchRules(track.title);
   const clauses: string[] = [];
+
   if (strictDuration && track.durationMs > 0) {
     const durationSec = Math.round(track.durationMs / 1000);
     const minSec = Math.max(1, durationSec - DURATION_TOLERANCE_SEC);
     const maxSec = durationSec + DURATION_TOLERANCE_SEC;
     clauses.push(`duration >= ${minSec} & duration <= ${maxSec}`);
   }
-  if (excluded.length > 0) {
-    clauses.push(`title !~=? "(?i)\\\\b(${excluded.join('|')})\\\\b"`);
+
+  for (const pattern of rules.requiredPatterns) {
+    clauses.push(`title ~= "(?i)${pattern}"`);
+  }
+  if (rules.excludedPatterns.length > 0) {
+    clauses.push(`title !~=? "(?i)(${rules.excludedPatterns.join('|')})"`);
   }
 
   return clauses.length > 0 ? clauses.join(' & ') : undefined;
@@ -181,14 +170,14 @@ export async function defaultYtDlpRamLoader(
 
   if (isHttp) {
     pushUniqueAttempt({ target: track.locator });
-    pushUniqueAttempt({ target: `ytsearch3:${baseQuery}`, matchFilter: strictFilter });
+    pushUniqueAttempt({ target: `ytsearch5:${baseQuery}`, matchFilter: strictFilter });
   } else {
-    pushUniqueAttempt({ target: `ytsearch3:${cleanLocator}`, matchFilter: strictFilter });
+    pushUniqueAttempt({ target: `ytsearch5:${cleanLocator}`, matchFilter: strictFilter });
   }
 
   if (strictFilter && variantFilter && strictFilter !== variantFilter) {
     pushUniqueAttempt({
-      target: `ytsearch3:${isHttp ? baseQuery : cleanLocator}`,
+      target: `ytsearch5:${isHttp ? baseQuery : cleanLocator}`,
       matchFilter: variantFilter,
     });
   }

@@ -103,18 +103,27 @@ describe('defaultYtDlpRamLoader Fallback (Vídeo Indisponível na URL Direta)', 
     expect(result.mode).toBe('ram');
     expect(calls).toHaveLength(1);
     const args = calls[0]?.args ?? [];
-    expect(args[args.length - 1]).toBe('ytsearch3:ATLXS - HYPNOTIC');
+    expect(args[args.length - 1]).toBe('ytsearch5:ATLXS - HYPNOTIC');
     expect(args).toContain('--max-downloads');
     expect(args).toContain('--match-filter');
     const filterExpr = args[args.indexOf('--match-filter') + 1] ?? '';
     expect(filterExpr).toContain('duration >= 74 & duration <= 124');
-    expect(filterExpr).toContain('slowed');
+    expect(filterExpr).toContain('!~=?');
+    expect(filterExpr).toContain('\\bslowed\\b');
     expect(calls[0]?.options?.acceptedExitCodes).toEqual([0, 101]);
   });
 
-  it('preserva termo de variante no filtro quando o título original o solicita explicitamente', async () => {
-    const track: CompactTrack = {
-      id: 'sp_slowed',
+  it('rejeita ultra/super slowed quando apenas slowed foi pedido e exige o qualificador quando especificado', async () => {
+    const onlySlowed: CompactTrack = {
+      id: 'sp_only_slowed',
+      source: 'spotify',
+      title: 'HYPNOTIC (Slowed)',
+      artist: 'ATLXS',
+      durationMs: 111_000,
+      locator: 'ATLXS - HYPNOTIC (Slowed)',
+    };
+    const superSlowed: CompactTrack = {
+      id: 'sp_super_slowed',
       source: 'spotify',
       title: 'HYPNOTIC (Super Slowed)',
       artist: 'ATLXS',
@@ -122,18 +131,34 @@ describe('defaultYtDlpRamLoader Fallback (Vídeo Indisponível na URL Direta)', 
       locator: 'ATLXS - HYPNOTIC (Super Slowed)',
     };
 
-    const calls: readonly string[][] = [];
+    const calls: string[][] = [];
     const fakeRunner = vi.fn(async (_cmd: string, args: readonly string[]) => {
-      (calls as string[][]).push([...args]);
+      calls.push([...args]);
       return Buffer.from([0x1a, 0x45, 0xdf, 0xa3]);
     });
 
-    await defaultYtDlpRamLoader(track, 25 * 1024 * 1024, new AbortController().signal, fakeRunner);
+    await defaultYtDlpRamLoader(
+      onlySlowed,
+      25 * 1024 * 1024,
+      new AbortController().signal,
+      fakeRunner,
+    );
+    await defaultYtDlpRamLoader(
+      superSlowed,
+      25 * 1024 * 1024,
+      new AbortController().signal,
+      fakeRunner,
+    );
 
-    const args = calls[0] ?? [];
-    const filterExpr = args[args.indexOf('--match-filter') + 1] ?? '';
-    expect(filterExpr).not.toContain('slowed');
-    expect(filterExpr).toContain('duration >= 93 & duration <= 143');
+    const onlySlowedFilter = calls[0]?.[calls[0].indexOf('--match-filter') + 1] ?? '';
+    expect(onlySlowedFilter).toContain('title ~= "(?i)\\bslowed\\b"');
+    expect(onlySlowedFilter).toContain('ultra|super|extreme|mega');
+
+    const superSlowedFilter = calls[1]?.[calls[1].indexOf('--match-filter') + 1] ?? '';
+    expect(superSlowedFilter).toContain('title ~= "(?i)\\bsuper\\b"');
+    expect(superSlowedFilter).toContain('title ~= "(?i)\\bslowed\\b"');
+    expect(superSlowedFilter).toContain('ultra|extreme|mega');
+    expect(superSlowedFilter).toContain('duration >= 93 & duration <= 143');
   });
 
   it('runProcessToBuffer aceita códigos de saída configurados (como 101 do --max-downloads)', async () => {

@@ -1,5 +1,10 @@
 import { getEnvConfig } from '../config/env.js';
-import type { CompactTrack, TrackSource } from '../queue/track.js';
+import {
+  type CompactTrack,
+  type TrackSource,
+  buildVariantMatchRules,
+  matchesVariantRules,
+} from '../queue/track.js';
 import { runProcessToBuffer, streamProcessLines } from '../utils/process-runner.js';
 
 interface YtDlpJsonItem {
@@ -113,10 +118,11 @@ export async function resolveSingleYoutubeTrack(
   source: TrackSource,
   requestedBy?: string,
   signal?: AbortSignal,
+  processRunner = runProcessToBuffer,
 ): Promise<CompactTrack> {
   const { ytdlpPath, ytdlpCookieArgs } = getEnvConfig();
   const isUrl = queryOrUrl.startsWith('http://') || queryOrUrl.startsWith('https://');
-  const target = isUrl ? queryOrUrl : `ytsearch1:${queryOrUrl}`;
+  const target = isUrl ? queryOrUrl : `ytsearch5:${queryOrUrl}`;
 
   const args = [
     '--dump-single-json',
@@ -128,7 +134,7 @@ export async function resolveSingleYoutubeTrack(
     target,
   ];
 
-  const buffer = await runProcessToBuffer(ytdlpPath, args, {
+  const buffer = await processRunner(ytdlpPath, args, {
     signal,
     timeoutMs: 20_000,
     maxBytes: 5 * 1024 * 1024,
@@ -136,13 +142,26 @@ export async function resolveSingleYoutubeTrack(
 
   const text = buffer.toString('utf-8').trim();
   const parsed = JSON.parse(text) as YtDlpJsonItem & { entries?: YtDlpJsonItem[] };
-  const entry = Array.isArray(parsed.entries) && parsed.entries[0] ? parsed.entries[0] : parsed;
+  const rawEntries =
+    Array.isArray(parsed.entries) && parsed.entries.length > 0 ? parsed.entries : [parsed];
 
-  const track = parseYtDlpJsonLine(JSON.stringify(entry), source, requestedBy);
-  if (!track) {
+  const candidates = rawEntries
+    .map((item) => parseYtDlpJsonLine(JSON.stringify(item), source, requestedBy))
+    .filter((item): item is CompactTrack => item !== undefined);
+
+  if (candidates.length === 0) {
     throw new Error(`Nenhuma faixa encontrada para: ${queryOrUrl}`);
   }
-  return track;
+
+  if (!isUrl && candidates.length > 1) {
+    const rules = buildVariantMatchRules(queryOrUrl);
+    const preferred = candidates.find((c) => matchesVariantRules(c.title, rules));
+    if (preferred) {
+      return preferred;
+    }
+  }
+
+  return candidates[0] as CompactTrack;
 }
 
 /**
@@ -171,4 +190,3 @@ export function resolveYoutubePlaylistStream(
   const lines = streamProcessLines(ytdlpPath, args, { signal });
   return chunkPlaylistStream(lines, source, requestedBy, maxTracks, 100);
 }
-
