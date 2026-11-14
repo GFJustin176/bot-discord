@@ -66,16 +66,17 @@ bot-discord/
 │   │   ├── client.ts             → Configuração do Client (Intents: Guilds, GuildVoiceStates, GuildMessages, MessageContent)
 │   │   ├── command-context.ts    → Abstração unificada para responder tanto a Slash Commands quanto a mensagens com prefixo
 │   │   ├── deploy-commands.ts    → Script de registro de Slash Commands na API do Discord
-│   │   ├── commands/             → Handlers compartilhados (/play e !play, skip, stop, queue, shuffle, loop, np, clear)
+│   │   ├── commands/             → Handlers compartilhados (/play e !play, skip, stop, queue, shuffle, loop, np, clear, autoplay)
 │   │   └── events/               → Listeners (interactionCreate, messageCreate, voiceStateUpdate, clientReady)
 │   ├── queue/
 │   │   ├── track.ts              → Definição enxuta de CompactTrack (metadados leves de baixo consumo de RAM)
 │   │   ├── ring-queue.ts         → Fila indexada O(1) para dequeue, Fisher-Yates shuffle O(n) e limite de 25.000 itens
-│   │   └── guild-session.ts      → Orquestrador por servidor (conecta fila, pre-fetcher, resolver e player de voz)
+│   │   └── guild-session.ts      → Orquestrador por servidor (conecta fila, autoplay, pre-fetcher, resolver e player de voz)
 │   ├── resolvers/
 │   │   ├── url-classifier.ts     → Identificação de URLs/queries (YouTube, YT Music, Spotify Track/Album/Playlist, busca textual)
 │   │   ├── youtube-resolver.ts   → Ingestão via yt-dlp (--flat-playlist em stream NDJSON) e resolução de URL de áudio (formato 251 WebM/Opus)
-│   │   └── spotify-resolver.ts   → Paginação da API do Spotify em background e conversão lazy (Artista + Título + ISRC → YT Music/YouTube)
+│   │   ├── spotify-resolver.ts   → Paginação da API do Spotify em background e conversão lazy (Artista + Título + ISRC → YT Music/YouTube)
+│   │   └── autoplay-resolver.ts  → Geração de fila dinâmica de recomendações via YouTube Radio Mix (RD<videoId>) com deduplicação
 │   ├── audio/
 │   │   ├── prebuffer-cache.ts    → Pré-buffering 100% em memória RAM para as faixas N e N+1 (zero escrita em SSD/disco)
 │   │   ├── stream-pipeline.ts    → Demux WebM/Opus direto da RAM (sem abrir ffmpeg no formato 251; ffmpeg apenas como fallback)
@@ -165,6 +166,36 @@ export class TrackQueue {
 }
 ```
 
+## Feature Spec: Autoplay (Rádio Dinâmica estilo Rythm.fm)
+
+### 1. Interface de Comando (`/autoplay` e `!autoplay`)
+- **Sintaxe:**
+  - Slash Command: `/autoplay [modo: enable | disable]`
+  - Comando por Prefixo: `!autoplay [enable | disable]` (aceitando também sinônimos `on`, `off`, `ativar`, `desativar` ou alternância *toggle* caso nenhum argumento seja passado; atalhos: `ap`, `radio`).
+- **Estado por Servidor (`GuildSession`):**
+  - `autoplay: boolean` (inicia como `false` por padrão na sessão).
+  - Ao ativar (`enable`) enquanto uma música já está tocando como faixa única (com fila vazia e sem ingestão de playlist em andamento), a sessão dispara imediatamente em background o preenchimento inicial de recomendações para que a faixa $N+1$ já entre no pré-buffer em RAM.
+  - Exibido também nos comandos `/queue` (`!queue`) e `/np` (`!np`) para visibilidade do estado atual (`Autoplay: on | off`).
+
+### 2. Motor de Recomendação por Gênero/Estilo (`autoplay-resolver.ts`)
+- **Fonte Algorítmica (`YouTube / YouTube Music Radio Mix — RD<videoId>`):**
+  - Utiliza o gerador nativo de Mix/Rádio do YouTube (`https://www.youtube.com/watch?v=<videoId>&list=RD<videoId>`) extraído via `yt-dlp --flat-playlist --dump-json --no-warnings --playlist-end 15`.
+  - **Faixa-semente do YouTube ou YouTube Music (`yt_<videoId>` / `ytm_<videoId>`):** Extrai o `videoId` diretamente do ID/URL da faixa-semente.
+  - **Faixa-semente do Spotify (`sp_<spotifyId>`):** Resolve primeiro o `videoId` correspondente no YouTube Music/YouTube via `resolveSingleYoutubeTrack(seedTrack.locator, 'ytmusic')` e, em seguida, extrai o Mix `RD<videoId>` daquele vídeo.
+- **Deduplicação e Histórico da Sessão (`playedHistory`):**
+  - A `GuildSession` armazena um histórico circular (até `500` itens) contendo os IDs de vídeo (`videoId`) e chaves normalizadas (`artista + título` em minúsculas sem sufixos como `Official Video`) de todas as faixas já reproduzidas ou enfileiradas na sessão.
+  - Ao consultar o Mix `RD<videoId>`, o resolvedor descarta a própria faixa-semente e quaisquer faixas já presentes no histórico ou na fila atual, selecionando até **5 faixas inéditas** por lote (`requestedBy: 'Autoplay'`).
+
+### 3. Gatilhos de Acionamento (Música Sozinha vs. Playlist)
+1. **Quando o usuário adiciona uma música sozinha (`queue.size === 0` e `!isIngestingPlaylist`):**
+   - Assim que a faixa única entra em reprodução (ou imediatamente ao executar `autoplay enable`), o `GuildSession` aciona em segundo plano o reabastecimento de Autoplay baseado nessa música, enfileira as faixas recomendadas do mesmo estilo/gênero e dispara o `triggerNextTrackPrefetch()` para pré-carregar a próxima música ($N+1$) em RAM sem interrupção.
+2. **Quando o usuário toca uma playlist e ela chega ao fim:**
+   - Enquanto houver músicas da playlist na fila (`queue.size > 0`) ou ingestão de playlist em andamento (`isIngestingPlaylist === true`), o Autoplay não interfere na fila.
+   - Assim que a **última música da playlist** começa a tocar (ou ao terminar, deixando `queue.size === 0` e `!isIngestingPlaylist`), o Autoplay usa essa **última música tocada da playlist** como semente (`seedTrack`) para gerar e enfileirar as próximas músicas similares, renovando o ciclo automaticamente a cada vez que a fila voltar a esvaziar.
+3. **Interação com Loop e Stop/Clear:**
+   - Se `loopMode !== 'off'` (`track` ou `queue`), o loop tem precedência sobre o Autoplay.
+   - `/stop` (`!stop`) encerra a reprodução e desconecta; `/clear` (`!clear`) limpa a fila atual e cancela buscas de Autoplay em voo.
+
 ## Testing Strategy
 
 - **Framework:** `vitest` (execução rápida compatível com ESM e TypeScript nativo).
@@ -173,6 +204,7 @@ export class TrackQueue {
   - **Unitários (meta $\ge 90\%$ de cobertura nos módulos `queue/` e `resolvers/url-classifier`):**
     - Inserção, remoção $O(1)$, paginação e *shuffle* de 25.000 itens na `TrackQueue` validando tempo de execução ($< 10\text{ ms}$) e ausência de vazamento de referências.
     - Classificação de URLs (links curtos `youtu.be`, `music.youtube.com`, `open.spotify.com/track|playlist|album`, links internacionalizados `/intl-pt/`).
+    - Resolução de Autoplay (`autoplay-resolver.ts`) e ciclo de vida na `GuildSession`: acionamento em faixa avulsa, acionamento apenas na última faixa de uma playlist, resolução de semente do Spotify e deduplicação contra histórico (`playedHistory`).
   - **Integração:**
     - Parser de stream NDJSON simulando saída do `yt-dlp --flat-playlist` com milhares de linhas e cancelamento via `AbortController`.
     - Gerenciador de `PrebufferCache` garantindo que apenas os arquivos das faixas $N$ e $N+1$ permaneçam em `tmp/audio-cache/` e que arquivos antigos sejam removidos imediatamente após a transição de faixa.
@@ -201,9 +233,10 @@ export class TrackQueue {
 3. **Estabilidade de Reprodução (Zero Oscilação de Velocidade / Cortes / Zero Escrita em Disco):**
    - A reprodução não deve realizar streaming HTTP direto para o encoder em tempo real sem amortecimento; o áudio da faixa atual ($N$) e da próxima ($N+1$) deve ser pré-carregado diretamente em `Buffer` na memória RAM (`PrebufferCache`, com teto de segurança configurável por faixa), eliminando escritas em SSD/disco.
    - Sempre que o stream de origem do YouTube/YouTube Music estiver no formato WebM/Opus 48kHz estéreo (formato `251`), o pipeline deve fazer o *demux* direto dos pacotes Opus a partir da RAM (`StreamType.WebmOpus`) **sem invocar o processo `ffmpeg`**, usando `ffmpeg` apenas como fallback para containers não-WebM/Opus.
-4. **Suporte Multi-Plataforma e Comandos Duplos:** Os comandos devem funcionar tanto via **Slash Commands** (`/play`, `/skip`, `/stop`, `/queue`, `/shuffle`, `/loop`, `/np`, `/clear`) quanto por **prefixo de mensagem no chat** (ex.: `!play`, `!skip`), aceitando URLs de faixas, álbuns e playlists do **Spotify** (modo híbrido: API Client Credentials + fallback embed/anônimo), **YouTube** e **YouTube Music**, além de buscas por texto livre.
+4. **Suporte Multi-Plataforma e Comandos Duplos:** Os comandos devem funcionar tanto via **Slash Commands** (`/play`, `/skip`, `/stop`, `/queue`, `/shuffle`, `/loop`, `/np`, `/clear`, `/autoplay`) quanto por **prefixo de mensagem no chat** (ex.: `!play`, `!skip`, `!autoplay [enable/disable]`), aceitando URLs de faixas, álbuns e playlists do **Spotify** (modo híbrido: API Client Credentials + fallback embed/anônimo), **YouTube** e **YouTube Music**, além de buscas por texto livre.
 5. **Política Estrita de Permanência em Voz:** O bot **não** deve desconectar quando a fila terminar se ainda houver usuários no canal de voz; a desconexão automática deve ocorrer **somente** quando o canal de voz ficar vazio (sem membros humanos), ou mediante comando explícito (`stop`).
 6. **Prevenção de Vazamento de Recursos:** Após 50 trocas de faixa (`skip`) ou término da fila, não deve haver processos `ffmpeg`/`yt-dlp` órfãos em execução nem acúmulo de mais de 2 arquivos temporários por servidor em `tmp/audio-cache/`.
+7. **Autoplay Contínuo e Sem Repetições:** Quando `autoplay` estiver habilitado (`enable`), tocar uma música avulsa ou chegar à última faixa de uma playlist deve enfileirar automaticamente faixas relacionadas (via YouTube Radio Mix `RD<videoId>` da última faixa tocada) sem repetir músicas já reproduzidas na sessão e mantendo o pré-carregamento em RAM da faixa $N+1$.
 
 ## Open Questions (Resolvidas)
 
