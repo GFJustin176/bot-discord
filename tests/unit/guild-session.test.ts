@@ -60,5 +60,80 @@ describe('GuildSession (Orquestração de Fila, Pré-Buffer N/N+1 e Permanência
     expect(session.isDestroyed).toBe(false);
     expect(cache.getCachedTrackIds('guild_idle')).toEqual([]);
   });
-});
 
+  it('aciona autoplay imediatamente ao tocar música avulsa e pré-carrega a recomendada na RAM', async () => {
+    const webmBytes = Buffer.from([0x1a, 0x45, 0xdf, 0xa3]);
+    const loadedIds: string[] = [];
+    const cache = new PrebufferCache(25 * 1024 * 1024, async (track) => {
+      loadedIds.push(track.id);
+      return { mode: 'ram', buffer: webmBytes };
+    });
+
+    const recommended = makeTrack('rec_1');
+    const autoplaySpy = vi.fn(async () => [recommended]);
+    const session = new GuildSession('guild_ap_single', 25_000, cache, vi.fn(), autoplaySpy);
+    session.setAutoplay(true);
+
+    await session.enqueueAndPlay([makeTrack('single_1')]);
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(autoplaySpy).toHaveBeenCalledTimes(1);
+    expect(autoplaySpy.mock.calls[0]?.[0].id).toBe('single_1');
+    expect(session.queue.size).toBe(1);
+    expect(session.queue.peek(0)?.id).toBe('rec_1');
+    expect(loadedIds).toContain('rec_1');
+  });
+
+  it('aguarda o fim da playlist e usa a última faixa tocada como semente do autoplay', async () => {
+    const webmBytes = Buffer.from([0x1a, 0x45, 0xdf, 0xa3]);
+    const cache = new PrebufferCache(25 * 1024 * 1024, async () => ({
+      mode: 'ram',
+      buffer: webmBytes,
+    }));
+
+    const autoplaySpy = vi.fn(async (seed: CompactTrack) => [makeTrack(`after_${seed.id}`)]);
+    const session = new GuildSession('guild_ap_playlist', 25_000, cache, vi.fn(), autoplaySpy);
+    session.setAutoplay(true);
+
+    await session.enqueueAndPlay([makeTrack('pl_1'), makeTrack('pl_2')]);
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Ainda há faixa da playlist na fila (pl_2); autoplay não deve disparar antecipadamente.
+    expect(autoplaySpy).not.toHaveBeenCalled();
+
+    // Avança para a última música da playlist (pl_2). Agora a fila fica vazia.
+    await session.advanceToNextTrack();
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(session.nowPlaying?.id).toBe('pl_2');
+    expect(autoplaySpy).toHaveBeenCalledTimes(1);
+    expect(autoplaySpy.mock.calls[0]?.[0].id).toBe('pl_2');
+    expect(session.queue.peek(0)?.id).toBe('after_pl_2');
+  });
+
+  it('respeita exclusão de histórico entre lotes consecutivos e não dispara quando loop está ativo', async () => {
+    const webmBytes = Buffer.from([0x1a, 0x45, 0xdf, 0xa3]);
+    const cache = new PrebufferCache(25 * 1024 * 1024, async () => ({
+      mode: 'ram',
+      buffer: webmBytes,
+    }));
+
+    const autoplaySpy = vi.fn(async () => [makeTrack('rec_loop')]);
+    const session = new GuildSession('guild_ap_loop', 25_000, cache, vi.fn(), autoplaySpy);
+    session.queue.setLoopMode('track');
+    session.setAutoplay(true);
+
+    await session.enqueueAndPlay([makeTrack('base')]);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(autoplaySpy).not.toHaveBeenCalled();
+
+    // Desativa loop e reativa autoplay para verificar histórico passado nas exclusões.
+    session.queue.setLoopMode('off');
+    session.setAutoplay(true);
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(autoplaySpy).toHaveBeenCalledTimes(1);
+    const callOpts = autoplaySpy.mock.calls[0]?.[1];
+    expect(callOpts?.excludeIds?.has('base')).toBe(true);
+  });
+});

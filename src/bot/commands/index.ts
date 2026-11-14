@@ -1,4 +1,7 @@
-import { type RESTPostAPIChatInputApplicationCommandsJSONBody, SlashCommandBuilder } from 'discord.js';
+import {
+  type RESTPostAPIChatInputApplicationCommandsJSONBody,
+  SlashCommandBuilder,
+} from 'discord.js';
 import type { CommandContext } from '../command-context.js';
 import {
   handlePauseCommand,
@@ -8,6 +11,7 @@ import {
   handleStopCommand,
 } from './playback-commands.js';
 import {
+  handleAutoplayCommand,
   handleClearCommand,
   handleLoopCommand,
   handleNowPlayingCommand,
@@ -46,6 +50,9 @@ const ALIAS_MAP: Record<string, string> = {
   tocando: 'np',
   clear: 'clear',
   limpar: 'clear',
+  autoplay: 'autoplay',
+  ap: 'autoplay',
+  radio: 'autoplay',
 };
 
 // Normaliza o nome do comando ou atalho em português/inglês para o identificador canônico.
@@ -64,6 +71,7 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   loop: handleLoopCommand,
   np: handleNowPlayingCommand,
   clear: handleClearCommand,
+  autoplay: handleAutoplayCommand,
 };
 
 // Obtém o handler correspondente a um comando Slash ou Prefixo.
@@ -77,25 +85,21 @@ export function buildSlashCommandsJson(): RESTPostAPIChatInputApplicationCommand
   return [
     new SlashCommandBuilder()
       .setName('play')
-      .setDescription('Toca uma música ou playlist do YouTube, YouTube Music ou Spotify (até 25.000 músicas)')
+      .setDescription(
+        'Toca uma música ou playlist do YouTube, YouTube Music ou Spotify (até 25.000 músicas)',
+      )
       .addStringOption((opt) =>
         opt
           .setName('busca')
           .setDescription('Link do Spotify, YouTube, YouTube Music ou nome da música')
           .setRequired(true),
       ),
-    new SlashCommandBuilder()
-      .setName('skip')
-      .setDescription('Pula para a próxima música da fila'),
+    new SlashCommandBuilder().setName('skip').setDescription('Pula para a próxima música da fila'),
     new SlashCommandBuilder()
       .setName('stop')
       .setDescription('Para a música, limpa a fila e desconecta do canal de voz'),
-    new SlashCommandBuilder()
-      .setName('pause')
-      .setDescription('Pausa a música atual'),
-    new SlashCommandBuilder()
-      .setName('resume')
-      .setDescription('Retoma a música pausada'),
+    new SlashCommandBuilder().setName('pause').setDescription('Pausa a música atual'),
+    new SlashCommandBuilder().setName('resume').setDescription('Retoma a música pausada'),
     new SlashCommandBuilder()
       .setName('queue')
       .setDescription('Mostra as músicas na fila de reprodução')
@@ -125,6 +129,18 @@ export function buildSlashCommandsJson(): RESTPostAPIChatInputApplicationCommand
     new SlashCommandBuilder()
       .setName('clear')
       .setDescription('Limpa todas as músicas da fila sem parar a música atual'),
+    new SlashCommandBuilder()
+      .setName('autoplay')
+      .setDescription('Ativa ou desativa a rádio automática baseada no estilo da música atual')
+      .addStringOption((opt) =>
+        opt
+          .setName('modo')
+          .setDescription('Ativar ou desativar o Autoplay')
+          .setRequired(false)
+          .addChoices(
+            { name: 'Ativar (enable)', value: 'enable' },
+            { name: 'Desativar (disable)', value: 'disable' },
+          ),
+      ),
   ].map((cmd) => cmd.toJSON());
 }
-

@@ -83,12 +83,12 @@ A lista detalhada de tarefas com critérios de aceitação, comandos de verifica
 - [x] Suíte completa de testes, linter e build passando (`npm run build && npm test -- --run`)
 
 ### Phase 5: Autoplay (Rádio Dinâmica Baseada na Última Faixa)
-- [ ] Task 9: Resolvedor de Autoplay via YouTube Radio Mix (`RD<videoId>`) e Deduplicação de Histórico
-- [ ] Task 10: Integração do Ciclo de Autoplay na `GuildSession` e Comando `/autoplay` (`!autoplay [enable/disable]`)
+- [x] Task 9: Resolvedor de Autoplay via YouTube Radio Mix (`RD<videoId>`) e Deduplicação de Histórico
+- [x] Task 10: Integração do Ciclo de Autoplay na `GuildSession` e Comando `/autoplay` (`!autoplay [enable/disable]`)
 
 ### Checkpoint: Autoplay Complete
-- [ ] Testes unitários de `autoplay-resolver`, `guild-session` (música avulsa + fim de playlist) e `command-parser` passando
-- [ ] Build TypeScript e linter limpos (`npm run build && npm test -- --run && npm run lint`)
+- [x] Testes unitários de `autoplay-resolver`, `guild-session` (música avulsa + fim de playlist) e `command-parser` passando
+- [x] Build TypeScript e linter limpos (`npm run build && npm test -- --run && npm run lint`)
 
 ## Risks and Mitigations
 

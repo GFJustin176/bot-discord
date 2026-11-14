@@ -1,4 +1,4 @@
-import { getGuildSession } from '../../queue/guild-session.js';
+import { getGuildSession, getOrCreateGuildSession } from '../../queue/guild-session.js';
 import { type LoopMode, formatDuration } from '../../queue/track.js';
 import type { CommandContext } from '../command-context.js';
 
@@ -22,10 +22,12 @@ export async function handleQueueCommand(ctx: CommandContext): Promise<void> {
   }
 
   if (pageData.totalItems === 0) {
-    lines.push('\n*Nenhuma música aguardando na fila.*');
+    lines.push(
+      `\n*Nenhuma música aguardando na fila.* | Autoplay: \`${session.autoplay ? 'on' : 'off'}\``,
+    );
   } else {
     lines.push(
-      `\n**Fila de Espera:** ${pageData.totalItems.toLocaleString('pt-BR')} música(s) | Página ${pageData.currentPage}/${pageData.totalPages} | Loop: \`${session.queue.loopMode}\``,
+      `\n**Fila de Espera:** ${pageData.totalItems.toLocaleString('pt-BR')} música(s) | Página ${pageData.currentPage}/${pageData.totalPages} | Loop: \`${session.queue.loopMode}\` | Autoplay: \`${session.autoplay ? 'on' : 'off'}\``,
     );
 
     const baseNumber = (pageData.currentPage - 1) * 10;
@@ -113,8 +115,49 @@ export async function handleNowPlayingCommand(ctx: CommandContext): Promise<void
       `**Tocando agora:** ${current.title}`,
       `**Artista:** ${current.artist}`,
       `**Duração:** \`${formatDuration(current.durationMs)}\` | **Origem:** \`${current.source}\``,
-      `**Músicas restantes na fila:** ${session.queue.size.toLocaleString('pt-BR')}`,
+      `**Músicas restantes na fila:** ${session.queue.size.toLocaleString('pt-BR')} | **Autoplay:** \`${session.autoplay ? 'on' : 'off'}\``,
     ].join('\n'),
+  );
+}
+
+// Interpreta argumentos enable/disable (e sinônimos) para o comando autoplay.
+export function parseAutoplayModeArg(
+  rawMode: string | undefined,
+  currentEnabled: boolean,
+): boolean | undefined {
+  const normalized = rawMode?.trim().toLowerCase();
+  if (!normalized) {
+    return !currentEnabled;
+  }
+  if (['enable', 'on', 'ativar', 'ativado', 'true', 'sim'].includes(normalized)) {
+    return true;
+  }
+  if (['disable', 'off', 'desativar', 'desativado', 'false', 'nao', 'não'].includes(normalized)) {
+    return false;
+  }
+  return undefined;
+}
+
+// Ativa ou desativa a adição automática de músicas relacionadas ao estilo da faixa atual.
+export async function handleAutoplayCommand(ctx: CommandContext): Promise<void> {
+  const session = getOrCreateGuildSession(ctx.guildId);
+  session.setTextChannel(ctx.textChannel);
+
+  const rawMode = ctx.getStringArg('modo', 0);
+  const nextState = parseAutoplayModeArg(rawMode, session.autoplay);
+
+  if (nextState === undefined) {
+    await ctx.reply(
+      `Argumento inválido. Uso: \`autoplay [enable|disable]\` (estado atual: **${session.autoplay ? 'ativado' : 'desativado'}**).`,
+    );
+    return;
+  }
+
+  session.setAutoplay(nextState);
+  await ctx.reply(
+    nextState
+      ? 'Modo **Autoplay ativado** (`enable`). Novas músicas do mesmo estilo serão adicionadas automaticamente quando a fila esvaziar.'
+      : 'Modo **Autoplay desativado** (`disable`).',
   );
 }
 
@@ -130,4 +173,3 @@ export async function handleClearCommand(ctx: CommandContext): Promise<void> {
   session.clearQueue();
   await ctx.reply(`Foram removidas **${count.toLocaleString('pt-BR')}** músicas da fila.`);
 }
-
