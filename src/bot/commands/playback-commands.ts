@@ -60,18 +60,9 @@ export async function handlePlayCommand(ctx: CommandContext): Promise<void> {
 
   if (classified.platform === 'spotify' && classified.id) {
     const kind =
-      classified.kind === 'playlist'
-        ? 'playlist'
-        : classified.kind === 'album'
-          ? 'album'
-          : 'track';
+      classified.kind === 'playlist' ? 'playlist' : classified.kind === 'album' ? 'album' : 'track';
 
-    const stream = resolveSpotifyStream(
-      kind,
-      classified.id,
-      ctx.userTag,
-      maxRemaining,
-    );
+    const stream = resolveSpotifyStream(kind, classified.id, ctx.userTag, maxRemaining);
     const { firstTrack } = await session.ingestTrackStream(stream);
 
     if (!firstTrack) {
@@ -154,6 +145,39 @@ export async function handleSkipCommand(ctx: CommandContext): Promise<void> {
   }
 }
 
+// Pula para a música correspondente na fila (considerando título e artista) sem descartar as puladas.
+export async function handleSkipToCommand(ctx: CommandContext): Promise<void> {
+  const session = getGuildSession(ctx.guildId);
+  if (!session || session.queue.size === 0) {
+    await ctx.reply('Não há músicas aguardando na fila.');
+    return;
+  }
+
+  const query = ctx.getStringArg('busca', 0);
+  if (!query) {
+    await ctx.reply(
+      'Informe o nome da música (e opcionalmente o artista). Ex.: `/skipto HYPNOTIC ATLXS`',
+    );
+    return;
+  }
+
+  const matched = session.queue.promoteBestMatch(query);
+  if (!matched) {
+    await ctx.reply(`Nenhuma música correspondente a "${query}" foi encontrada na fila.`);
+    return;
+  }
+
+  session.setTextChannel(ctx.textChannel);
+  await ctx.defer();
+  const next = await session.skip();
+
+  if (next) {
+    await ctx.reply(`Pulando para **${next.title}** — *${next.artist}*.`);
+  } else {
+    await ctx.reply(`Não foi possível iniciar **${matched.title}**.`);
+  }
+}
+
 // Para a reprodução, limpa a fila/RAM e desconecta do canal de voz.
 export async function handleStopCommand(ctx: CommandContext): Promise<void> {
   const session = getGuildSession(ctx.guildId);
@@ -189,4 +213,3 @@ export async function handleResumeCommand(ctx: CommandContext): Promise<void> {
   session.resume();
   await ctx.reply(`Reprodução retomada: **${session.nowPlaying.title}**.`);
 }
-

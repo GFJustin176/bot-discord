@@ -52,5 +52,14 @@ describe('parsePrefixMessage & normalizeCommandAlias', () => {
 
     const slashNames = buildSlashCommandsJson().map((c) => c.name);
     expect(slashNames).toContain('autoplay');
+    expect(slashNames).toContain('skipto');
+
+    expect(normalizeCommandAlias('skipto')).toBe('skipto');
+    expect(normalizeCommandAlias('st')).toBe('skipto');
+    expect(normalizeCommandAlias('jumpto')).toBe('skipto');
+    expect(normalizeCommandAlias('jump')).toBe('skipto');
+    expect(normalizeCommandAlias('pularpara')).toBe('skipto');
+    expect(normalizeCommandAlias('irpara')).toBe('skipto');
+    expect(parsePrefixMessage('!skipto Stay Rihanna', '!')?.rawArgs).toBe('Stay Rihanna');
   });
 });

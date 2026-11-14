@@ -1,4 +1,10 @@
-import type { CompactTrack, LoopMode } from './track.js';
+import {
+  type CompactTrack,
+  type LoopMode,
+  type VariantMatchRules,
+  buildVariantMatchRules,
+  matchesVariantRules,
+} from './track.js';
 
 // Estrutura de retorno para consulta paginada da fila.
 export interface QueuePage {
@@ -9,6 +15,71 @@ export interface QueuePage {
 }
 
 const COMPACTION_THRESHOLD = 2048;
+
+function normalizeMatchText(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/\u00a0/g, ' ')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function scoreTrackCandidate(
+  track: CompactTrack,
+  normQuery: string,
+  queryTokens: readonly string[],
+  variantRules: VariantMatchRules,
+): number {
+  const normTitle = normalizeMatchText(track.title);
+  const normArtist = normalizeMatchText(track.artist);
+  if (!normTitle && !normArtist) {
+    return -1;
+  }
+
+  let titleHits = 0;
+  let artistHits = 0;
+  let matchedCount = 0;
+
+  for (const token of queryTokens) {
+    const inTitle = normTitle.includes(token);
+    const inArtist = normArtist.includes(token);
+    if (inTitle) titleHits += 1;
+    if (inArtist) artistHits += 1;
+    if (inTitle || inArtist) matchedCount += 1;
+  }
+
+  if (matchedCount === 0) {
+    return -1;
+  }
+
+  // Exige cobertura completa ou ao menos metade dos termos com presença no título.
+  const fullCoverage = matchedCount === queryTokens.length;
+  const partialWithTitle = titleHits > 0 && matchedCount / queryTokens.length >= 0.5;
+  if (!fullCoverage && !partialWithTitle) {
+    return -1;
+  }
+
+  let score = 0;
+  if (normTitle === normQuery) score += 100;
+  else if (normTitle.includes(normQuery)) score += 50;
+
+  const combined = `${normTitle} ${normArtist}`;
+  const reversed = `${normArtist} ${normTitle}`;
+  if (combined.includes(normQuery) || reversed.includes(normQuery)) {
+    score += 45;
+  }
+
+  score += titleHits * 20 + artistHits * 15;
+  if (titleHits > 0 && artistHits > 0) score += 30;
+  if (matchesVariantRules(track.title, variantRules)) score += 40;
+  score += Math.round((matchedCount / queryTokens.length) * 30);
+  score -= Math.min(10, Math.abs(normTitle.length - normQuery.length) * 0.1);
+
+  return score;
+}
 
 /**
  * Fila indexada baseada em ponteiro lógico (head) para garantir desenfileiramento O(1)
@@ -118,6 +189,55 @@ export class TrackQueue {
     }
   }
 
+  /**
+   * Localiza a faixa com melhor correspondência (título e/ou artista) na fila e move-a
+   * para a próxima posição sem descartar nenhuma das demais músicas da fila.
+   */
+  public promoteBestMatch(query: string): CompactTrack | undefined {
+    const normQuery = normalizeMatchText(query);
+    if (!normQuery || this.size === 0) {
+      return undefined;
+    }
+
+    const queryTokens = normQuery.split(' ').filter((t) => t.length > 0);
+    if (queryTokens.length === 0) {
+      return undefined;
+    }
+
+    const variantRules = buildVariantMatchRules(query);
+    let bestIndex = -1;
+    let bestScore = -1;
+
+    for (let i = this.head; i < this.items.length; i += 1) {
+      const item = this.items[i];
+      if (!item) continue;
+      const score = scoreTrackCandidate(item, normQuery, queryTokens, variantRules);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = i;
+      }
+    }
+
+    if (bestIndex === -1) {
+      return undefined;
+    }
+
+    const matched = this.items[bestIndex];
+    if (!matched || bestIndex === this.head) {
+      return matched;
+    }
+
+    this.items.splice(bestIndex, 1);
+    if (this.head > 0) {
+      this.head -= 1;
+      this.items[this.head] = matched;
+    } else {
+      this.items.unshift(matched);
+    }
+
+    return matched;
+  }
+
   // Limpa completamente a fila e libera referências para coleta de lixo imediata.
   public clear(): void {
     this.items = [];
@@ -145,4 +265,3 @@ export class TrackQueue {
     };
   }
 }
-

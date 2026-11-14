@@ -8,6 +8,7 @@ import {
   handlePlayCommand,
   handleResumeCommand,
   handleSkipCommand,
+  handleSkipToCommand,
   handleStopCommand,
 } from './playback-commands.js';
 import {
@@ -29,6 +30,12 @@ const ALIAS_MAP: Record<string, string> = {
   s: 'skip',
   pular: 'skip',
   next: 'skip',
+  skipto: 'skipto',
+  st: 'skipto',
+  jumpto: 'skipto',
+  jump: 'skipto',
+  pularpara: 'skipto',
+  irpara: 'skipto',
   stop: 'stop',
   parar: 'stop',
   leave: 'stop',
@@ -63,6 +70,7 @@ export function normalizeCommandAlias(input: string): string | undefined {
 const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   play: handlePlayCommand,
   skip: handleSkipCommand,
+  skipto: handleSkipToCommand,
   stop: handleStopCommand,
   pause: handlePauseCommand,
   resume: handleResumeCommand,
@@ -95,6 +103,15 @@ export function buildSlashCommandsJson(): RESTPostAPIChatInputApplicationCommand
           .setRequired(true),
       ),
     new SlashCommandBuilder().setName('skip').setDescription('Pula para a próxima música da fila'),
+    new SlashCommandBuilder()
+      .setName('skipto')
+      .setDescription('Pula para a música correspondente na fila sem apagar as faixas puladas')
+      .addStringOption((opt) =>
+        opt
+          .setName('busca')
+          .setDescription('Nome da música e/ou artista na fila')
+          .setRequired(true),
+      ),
     new SlashCommandBuilder()
       .setName('stop')
       .setDescription('Para a música, limpa a fila e desconecta do canal de voz'),

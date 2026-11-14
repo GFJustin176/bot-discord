@@ -477,6 +477,15 @@ export class GuildSession {
     return this.advanceToNextTrack(true);
   }
 
+  // Pula diretamente para a música correspondente na fila mantendo todas as faixas puladas na fila.
+  public async skipTo(query: string): Promise<CompactTrack | undefined> {
+    const matched = this.queue.promoteBestMatch(query);
+    if (!matched) {
+      return undefined;
+    }
+    return this.skip();
+  }
+
   // Pausa a reprodução atual.
   public pause(): boolean {
     return this.player.pause(true);

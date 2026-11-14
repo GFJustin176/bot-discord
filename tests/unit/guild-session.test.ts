@@ -284,4 +284,48 @@ describe('GuildSession (Orquestração de Fila, Pré-Buffer N/N+1 e Permanência
     expect(session.queue.size).toBe(1);
     expect(session.queue.peek(0)?.id).toBe('t3');
   });
+
+  it('pula para a faixa correspondente via skipTo mantendo todas as músicas puladas na fila (mesmo com shuffle)', async () => {
+    const webmBytes = Buffer.from([0x1a, 0x45, 0xdf, 0xa3]);
+    const cache = new PrebufferCache(25 * 1024 * 1024, async () => ({
+      mode: 'ram',
+      buffer: webmBytes,
+    }));
+
+    const session = new GuildSession(
+      'guild_skipto',
+      25_000,
+      cache,
+      vi.fn(),
+      undefined,
+      createMemoryAutoplayStore(),
+    );
+
+    const tracks: CompactTrack[] = [
+      { ...makeTrack('1'), title: 'Primeira', artist: 'Artista 1' },
+      { ...makeTrack('2'), title: 'Segunda', artist: 'Artista 2' },
+      { ...makeTrack('3'), title: 'Terceira', artist: 'Artista 3' },
+      { ...makeTrack('4'), title: 'Brega Assumptions', artist: 'DJ Nolotil' },
+      { ...makeTrack('5'), title: 'Quinta', artist: 'Artista 5' },
+    ];
+
+    await session.enqueueAndPlay(tracks);
+    session.queue.shuffle();
+
+    const remainingBeforeIds = session.queue.getPage(1, 10).items.map((t) => t.id);
+    expect(remainingBeforeIds).toHaveLength(4);
+
+    // Busca sem correspondência não altera faixa atual nem fila.
+    expect(await session.skipTo('Inexistente XYZ')).toBeUndefined();
+    expect(session.nowPlaying?.id).toBe('1');
+    expect(session.queue.getPage(1, 10).items.map((t) => t.id)).toEqual(remainingBeforeIds);
+
+    // Pula para a faixa correspondente sem descartar nenhuma das demais da fila embaralhada.
+    const jumped = await session.skipTo('brega dj nolotil');
+    expect(jumped?.id).toBe('4');
+    expect(session.nowPlaying?.id).toBe('4');
+
+    const remainingAfterIds = session.queue.getPage(1, 10).items.map((t) => t.id);
+    expect(remainingAfterIds).toEqual(remainingBeforeIds.filter((id) => id !== '4'));
+  });
 });

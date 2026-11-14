@@ -76,5 +76,58 @@ describe('TrackQueue (Capacidade de 25.000 Músicas e Complexidade O(1))', () =>
     queue.setLoopMode('queue');
     expect(queue.loopMode).toBe('queue');
   });
-});
 
+  it('promove a música com melhor correspondência (título + artista) sem apagar as faixas puladas', () => {
+    const queue = new TrackQueue(100);
+    queue.enqueueBatch([
+      {
+        id: '1',
+        source: 'spotify',
+        title: 'Stay',
+        artist: 'The Kid LAROI, Justin Bieber',
+        durationMs: 141_000,
+        locator: 'Stay Justin Bieber',
+      },
+      {
+        id: '2',
+        source: 'spotify',
+        title: 'HYPNOTIC (Ultra Slowed)',
+        artist: 'ATLXS',
+        durationMs: 124_000,
+        locator: 'ATLXS - HYPNOTIC (Ultra Slowed)',
+      },
+      {
+        id: '3',
+        source: 'spotify',
+        title: 'Stay',
+        artist: 'Rihanna',
+        durationMs: 240_000,
+        locator: 'Rihanna - Stay',
+      },
+      {
+        id: '4',
+        source: 'spotify',
+        title: 'HYPNOTIC (Slowed)',
+        artist: 'ATLXS',
+        durationMs: 111_000,
+        locator: 'ATLXS - HYPNOTIC (Slowed)',
+      },
+    ]);
+
+    const matchByArtist = queue.promoteBestMatch('Stay Rihanna');
+    expect(matchByArtist?.id).toBe('3');
+    expect(queue.dequeue()?.id).toBe('3');
+
+    // As demais faixas permanecem intactas na fila na ordem em que estavam.
+    expect(queue.getPage(1, 10).items.map((t) => t.id)).toEqual(['1', '2', '4']);
+
+    const matchSlowed = queue.promoteBestMatch('HYPNOTIC slowed');
+    expect(matchSlowed?.id).toBe('4');
+    expect(queue.dequeue()?.id).toBe('4');
+    expect(queue.getPage(1, 10).items.map((t) => t.id)).toEqual(['1', '2']);
+
+    // Consulta inexistente não altera a fila.
+    expect(queue.promoteBestMatch('Música Que Não Existe')).toBeUndefined();
+    expect(queue.getPage(1, 10).items.map((t) => t.id)).toEqual(['1', '2']);
+  });
+});
