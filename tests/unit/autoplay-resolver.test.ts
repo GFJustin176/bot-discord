@@ -145,4 +145,94 @@ describe('autoplay-resolver (YouTube Radio Mix & Deduplicação)', () => {
     expect(results[0]?.title).toBe('Uprising');
     expect(results[0]?.source).toBe('ytmusic');
   });
+
+  it('substitui faixas do Autoplay nas 4 categorias da blacklist pela versão normal da música', async () => {
+    const seed = makeYoutubeTrack('seed_bl', 'Original Phonk', 'Artist A');
+    const ndjsonLines = [
+      JSON.stringify({
+        id: 'v_slowed',
+        title: 'Track One (Slowed)',
+        artist: 'Artist B',
+        duration: 130,
+      }),
+      JSON.stringify({
+        id: 'v_slowed_int',
+        title: 'Track Two (Ultra Slowed + Reverb)',
+        artist: 'Artist C',
+        duration: 165,
+      }),
+      JSON.stringify({
+        id: 'v_speed',
+        title: 'Track Three (Sped Up)',
+        artist: 'Artist D',
+        duration: 105,
+      }),
+      JSON.stringify({
+        id: 'v_speed_int',
+        title: 'Track Four (Super Speed Up)',
+        artist: 'Artist E',
+        duration: 95,
+      }),
+      JSON.stringify({
+        id: 'v_super_slowed_only_allowed',
+        title: 'Track Five (Normal)',
+        artist: 'Artist F',
+        duration: 180,
+      }),
+    ];
+
+    async function* fakeMixStream(): AsyncGenerator<string, void, undefined> {
+      for (const line of ndjsonLines) {
+        yield line;
+      }
+    }
+
+    const resolveNormalSpy = vi.fn(async (query: string) => ({
+      id: `yt_norm_${query.slice(0, 8)}`,
+      source: 'youtube' as const,
+      title: query.includes(' - ') ? (query.split(' - ')[1] ?? query) : query,
+      artist: query.includes(' - ') ? (query.split(' - ')[0] ?? 'Artista') : 'Artista',
+      durationMs: 180_000,
+      locator: `https://www.youtube.com/watch?v=norm_${query.length}`,
+      requestedBy: 'Autoplay',
+    }));
+
+    // Com todas as 4 categorias bloqueadas, todas as variantes são trocadas pelas versões normais.
+    const results = await fetchAutoplayRecommendations(seed, {
+      limit: 5,
+      blacklist: ['slowed', 'slowed_intensificado', 'speed_up', 'speed_up_intensificado'],
+      resolveSeedTrack: resolveNormalSpy,
+      mixLineStreamFactory: () => fakeMixStream(),
+    });
+
+    expect(resolveNormalSpy).toHaveBeenCalledTimes(4);
+    expect(resolveNormalSpy.mock.calls.map((c) => c[0])).toEqual([
+      'Artist B - Track One',
+      'Artist C - Track Two',
+      'Artist D - Track Three',
+      'Artist E - Track Four',
+    ]);
+    expect(results).toHaveLength(5);
+    expect(results.map((r) => r.title)).toEqual([
+      'Track One',
+      'Track Two',
+      'Track Three',
+      'Track Four',
+      'Track Five (Normal)',
+    ]);
+
+    // Com apenas 'slowed' na blacklist, 'Ultra Slowed' não é bloqueada.
+    const resolveOnlySlowedSpy = vi.fn(resolveNormalSpy);
+    const onlySlowedResults = await fetchAutoplayRecommendations(seed, {
+      limit: 5,
+      blacklist: ['slowed'],
+      resolveSeedTrack: resolveOnlySlowedSpy,
+      mixLineStreamFactory: () => fakeMixStream(),
+    });
+
+    expect(resolveOnlySlowedSpy).toHaveBeenCalledTimes(1);
+    expect(resolveOnlySlowedSpy.mock.calls[0]?.[0]).toBe('Artist B - Track One');
+    expect(onlySlowedResults[0]?.title).toBe('Track One');
+    expect(onlySlowedResults[1]?.title).toBe('Track Two (Ultra Slowed + Reverb)');
+  });
 });

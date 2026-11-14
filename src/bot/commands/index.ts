@@ -13,6 +13,7 @@ import {
 } from './playback-commands.js';
 import {
   handleAutoplayCommand,
+  handleBlacklistCommand,
   handleClearCommand,
   handleLoopCommand,
   handleNowPlayingCommand,
@@ -60,6 +61,8 @@ const ALIAS_MAP: Record<string, string> = {
   autoplay: 'autoplay',
   ap: 'autoplay',
   radio: 'autoplay',
+  blacklist: 'blacklist',
+  bl: 'blacklist',
 };
 
 // Normaliza o nome do comando ou atalho em português/inglês para o identificador canônico.
@@ -80,6 +83,7 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   np: handleNowPlayingCommand,
   clear: handleClearCommand,
   autoplay: handleAutoplayCommand,
+  blacklist: handleBlacklistCommand,
 };
 
 // Obtém o handler correspondente a um comando Slash ou Prefixo.
@@ -157,6 +161,39 @@ export function buildSlashCommandsJson(): RESTPostAPIChatInputApplicationCommand
           .addChoices(
             { name: 'Ativar (enable)', value: 'enable' },
             { name: 'Desativar (disable)', value: 'disable' },
+          ),
+      ),
+    new SlashCommandBuilder()
+      .setName('blacklist')
+      .setDescription(
+        'Bloqueia variantes no Autoplay e substitui automaticamente pela versão normal',
+      )
+      .addStringOption((opt) =>
+        opt
+          .setName('acao')
+          .setDescription('Ação desejada')
+          .setRequired(false)
+          .addChoices(
+            { name: 'Alternar (toggle)', value: 'toggle' },
+            { name: 'Adicionar (add)', value: 'add' },
+            { name: 'Remover (remove)', value: 'remove' },
+            { name: 'Listar ativas (list)', value: 'list' },
+            { name: 'Limpar todas (clear)', value: 'clear' },
+          ),
+      )
+      .addStringOption((opt) =>
+        opt
+          .setName('categoria')
+          .setDescription('Categoria permitida na blacklist do Autoplay')
+          .setRequired(false)
+          .addChoices(
+            { name: 'Slowed (slowed)', value: 'slowed' },
+            { name: 'Slowed Intensificado (ultra/super slowed)', value: 'slowed_intensificado' },
+            { name: 'Speed Up (speed up / sped up / nightcore)', value: 'speed_up' },
+            {
+              name: 'Speed Up Intensificado (ultra/super speed up)',
+              value: 'speed_up_intensificado',
+            },
           ),
       ),
   ].map((cmd) => cmd.toJSON());

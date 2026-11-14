@@ -117,3 +117,88 @@ export function matchesVariantRules(candidateTitle: string, rules: VariantMatchR
   }
   return true;
 }
+
+export const AUTOPLAY_BLACKLIST_CATEGORIES = [
+  'slowed',
+  'slowed_intensificado',
+  'speed_up',
+  'speed_up_intensificado',
+] as const;
+
+export type AutoplayBlacklistCategory = (typeof AUTOPLAY_BLACKLIST_CATEGORIES)[number];
+
+export const AUTOPLAY_BLACKLIST_LABELS: Record<AutoplayBlacklistCategory, string> = {
+  slowed: 'Slowed',
+  slowed_intensificado: 'Slowed Intensificado (ultra/super)',
+  speed_up: 'Speed Up',
+  speed_up_intensificado: 'Speed Up Intensificado (ultra/super)',
+};
+
+const BLACKLIST_INPUT_ALIASES: Record<string, AutoplayBlacklistCategory> = {
+  slowed: 'slowed',
+  slowed_intensificado: 'slowed_intensificado',
+  speed_up: 'speed_up',
+  sped_up: 'speed_up',
+  speed_up_intensificado: 'speed_up_intensificado',
+  sped_up_intensificado: 'speed_up_intensificado',
+};
+
+/**
+ * Converte a entrada do usuário em uma das 4 categorias fechadas da blacklist do Autoplay.
+ * Retorna undefined para termos não permitidos.
+ */
+export function parseBlacklistCategory(input: string): AutoplayBlacklistCategory | undefined {
+  const normalized = input
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
+  return BLACKLIST_INPUT_ALIASES[normalized];
+}
+
+/**
+ * Classifica o título de uma faixa recomendada pelo Autoplay em uma das 4 categorias da blacklist.
+ */
+export function classifyAutoplayBlacklistCategory(
+  title: string,
+): AutoplayBlacklistCategory | undefined {
+  if (
+    /\b(ultra|super|extreme|mega)\s+slowed\b|\bslowed[^\w]+(ultra|super|extreme|mega)\b/i.test(
+      title,
+    )
+  ) {
+    return 'slowed_intensificado';
+  }
+  if (/\bslowed\b/i.test(title)) {
+    return 'slowed';
+  }
+  if (
+    /\b(ultra|super|extreme|mega)\s+(speed\s*up|sped\s*up|nightcore)\b|\b(speed\s*up|sped\s*up|nightcore)[^\w]+(ultra|super|extreme|mega)\b/i.test(
+      title,
+    )
+  ) {
+    return 'speed_up_intensificado';
+  }
+  if (/\b(speed\s*up|sped\s*up|nightcore)\b/i.test(title)) {
+    return 'speed_up';
+  }
+  return undefined;
+}
+
+/**
+ * Remove modificadores de slowed / speed up do título para buscar a versão normal correspondente.
+ */
+export function stripVariantModifiersFromTitle(title: string): string {
+  return title
+    .replace(/\s*[[(][^)\]]*\b(slowed|speed\s*up|sped\s*up|nightcore|reverb)\b[^)\]]*[\])]/gi, ' ')
+    .replace(
+      /\b(ultra|super|extreme|mega)\b(?=\s+(slowed|speed\s*up|sped\s*up|nightcore)\b)/gi,
+      ' ',
+    )
+    .replace(
+      /\b(slowed|speed\s*up|sped\s*up|nightcore)\b(?:\s*\+?\s*reverb|\s*\d+(?:\.\d+)?x?|\s*version|\s*edit)?/gi,
+      ' ',
+    )
+    .replace(/(?:^[\s\-–—|+]+|[\s\-–—|+]+$)/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}

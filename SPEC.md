@@ -197,6 +197,24 @@ export class TrackQueue {
    - Se `loopMode !== 'off'` (`track` ou `queue`), o loop tem precedência sobre o Autoplay.
    - `/stop` (`!stop`) encerra a reprodução e desconecta; `/clear` (`!clear`) limpa a fila atual e cancela buscas de Autoplay em voo.
 
+### 4. Blacklist Categorizada de Variantes do Autoplay (`/blacklist` e `!blacklist`)
+- **Escopo Exclusivo:** Aplica-se **somente** às músicas recomendadas e adicionadas automaticamente pelo **Autoplay**. Músicas ou playlists adicionadas manualmente pelo usuário via `/play` (`!play`) nunca são bloqueadas ou substituídas pela blacklist.
+- **Categorias Fechadas (Enum Estrito — Sem Termos Livres):**
+  O comando aceita exclusivamente as 4 categorias pré-definidas abaixo (rejeitando qualquer termo arbitrário digitado pelo usuário):
+  1. `slowed`: faixas com `slowed` no título sem intensificador (`ultra`, `super`, `extreme`, `mega`).
+  2. `slowed_intensificado`: faixas com `ultra slowed`, `super slowed`, `extreme slowed` ou `mega slowed` no título.
+  3. `speed_up`: faixas com `speed up`, `sped up` ou `nightcore` no título sem intensificador (`ultra`, `super`, `extreme`, `mega`).
+  4. `speed_up_intensificado`: faixas com `ultra`, `super`, `extreme` ou `mega` combinados com `speed up`, `sped up` ou `nightcore` no título.
+- **Interface de Comando (`/blacklist`, `!blacklist`, `!bl`):**
+  - Slash Command: `/blacklist [acao: toggle | add | remove | list | clear] [categoria: slowed | slowed_intensificado | speed_up | speed_up_intensificado]`
+  - Prefixo: `!blacklist` (lista categorias ativas), `!blacklist [add|remove] <categoria>` (ou alternância direta `!blacklist <categoria>`), `!blacklist clear`.
+  - Persistência por servidor (`guildId`) no mesmo armazenamento `data/guild-settings.json` do Autoplay (iniciando vazia `[]` por padrão quando o bot entra no servidor).
+- **Substituição Automática pela Versão Normal (`autoplay-resolver.ts`):**
+  - Quando o mix do Autoplay retornar uma faixa cujo título se enquadre em uma categoria ativa da blacklist do servidor:
+    1. O resolvedor remove os sufixos/modificadores da variante (`Slowed`, `Ultra Slowed`, `Super Slowed`, `Reverb`, `Sped Up`, `Speed Up`, `Nightcore`, etc.) do título para extrair o nome base da música e o artista.
+    2. Realiza a busca pela **versão normal (original)** da mesma música via `resolveSingleYoutubeTrack("<artista> - <título limpo>", targetSource, 'Autoplay')` (que filtra variantes `slowed`/`sped up`).
+    3. Caso a versão normal seja encontrada e ainda não conste no histórico/fila (`seenIds`/`seenKeys`), ela é adicionada à fila no lugar da versão bloqueada.
+
 ## Testing Strategy
 
 - **Framework:** `vitest` (execução rápida compatível com ESM e TypeScript nativo).

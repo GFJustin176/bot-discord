@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { parsePrefixMessage } from '../../src/bot/command-context.js';
 import { buildSlashCommandsJson, normalizeCommandAlias } from '../../src/bot/commands/index.js';
-import { parseAutoplayModeArg } from '../../src/bot/commands/queue-commands.js';
+import {
+  parseAutoplayModeArg,
+  parseBlacklistCommandArgs,
+} from '../../src/bot/commands/queue-commands.js';
 
 describe('parsePrefixMessage & normalizeCommandAlias', () => {
   it('extrai comando e texto completo após o prefixo configurado', () => {
@@ -61,5 +64,35 @@ describe('parsePrefixMessage & normalizeCommandAlias', () => {
     expect(normalizeCommandAlias('pularpara')).toBe('skipto');
     expect(normalizeCommandAlias('irpara')).toBe('skipto');
     expect(parsePrefixMessage('!skipto Stay Rihanna', '!')?.rawArgs).toBe('Stay Rihanna');
+
+    expect(slashNames).toContain('blacklist');
+    expect(normalizeCommandAlias('blacklist')).toBe('blacklist');
+    expect(normalizeCommandAlias('bl')).toBe('blacklist');
+
+    expect(parseBlacklistCommandArgs(undefined, undefined)).toEqual({ kind: 'list' });
+    expect(parseBlacklistCommandArgs('clear', undefined)).toEqual({ kind: 'clear' });
+    expect(parseBlacklistCommandArgs('slowed', undefined)).toEqual({
+      kind: 'update',
+      action: 'toggle',
+      category: 'slowed',
+    });
+    expect(parseBlacklistCommandArgs('add slowed intensificado', 'slowed')).toEqual({
+      kind: 'update',
+      action: 'add',
+      category: 'slowed_intensificado',
+    });
+    expect(parseBlacklistCommandArgs('remove', 'speed_up_intensificado')).toEqual({
+      kind: 'update',
+      action: 'remove',
+      category: 'speed_up_intensificado',
+    });
+    expect(parseBlacklistCommandArgs('add remix', 'remix')).toEqual({
+      kind: 'invalid-category',
+      rawInput: 'remix',
+    });
+    expect(parseBlacklistCommandArgs('rock', undefined)).toEqual({
+      kind: 'invalid-category',
+      rawInput: 'rock',
+    });
   });
 });

@@ -293,4 +293,55 @@
 - [x] All tests pass (`npm test -- --run`)
 - [x] Application builds and lints without errors (`npm run build && npm run lint`)
 - [x] Slash commands updated (`npm run deploy:commands`)
-- [ ] Review with human
+- [x] Review with human
+
+---
+
+## Task 11: Categorias de Blacklist, Persistência por Servidor e Substituição pela Versão Normal no Autoplay
+
+**Description:** Define o enum fechado das 4 categorias de blacklist do Autoplay (`slowed`, `slowed_intensificado`, `speed_up`, `speed_up_intensificado`), persiste a lista de categorias ativas por servidor em `src/config/guild-settings.ts` e atualiza `fetchAutoplayRecommendations` (`src/resolvers/autoplay-resolver.ts`) para detectar títulos que caiam em uma categoria ativa da blacklist, extrair o nome limpo da música/artista e buscar automaticamente a **versão normal** via `resolveSingleYoutubeTrack` para adicioná-la à fila no lugar da variante bloqueada.
+
+**Acceptance criteria:**
+- [x] Classifica com precisão títulos nas 4 categorias: `slowed` (sem intensificadores), `slowed_intensificado` (`ultra`/`super`/`extreme`/`mega` + `slowed`), `speed_up` (`speed up`/`sped up`/`nightcore` sem intensificadores) e `speed_up_intensificado` (`ultra`/`super`/`extreme`/`mega` + `speed up`/`sped up`/`nightcore`).
+- [x] Persiste as categorias ativas por `guildId` em `data/guild-settings.json` (iniciando vazia `[]` por padrão).
+- [x] Quando `fetchAutoplayRecommendations` encontra um candidato bloqueado pela blacklist ativa, limpa os modificadores de variante do título, busca a versão normal correspondente e enfileira a versão normal (respeitando deduplicação `seenIds`/`seenKeys`).
+
+**Verification:**
+- [x] Tests pass: `npx vitest run tests/unit/autoplay-resolver.test.ts`
+- [x] Build succeeds: `npm run build`
+
+**Dependencies:** Task 9, Task 10
+
+**Files likely touched:**
+- `src/queue/track.ts`
+- `src/config/guild-settings.ts`
+- `src/resolvers/autoplay-resolver.ts`
+- `tests/unit/autoplay-resolver.test.ts`
+
+**Estimated scope:** Medium: 3-4 files
+
+---
+
+## Task 12: Integração na `GuildSession` e Comando `/blacklist` (`!blacklist`)
+
+**Description:** Expõe o gerenciamento da blacklist na `GuildSession` (repassando as categorias ativas apenas para `fetchAutoplayRecommendations`) e adiciona o comando `/blacklist` (`!blacklist` / `!bl`) restrito às 4 categorias pré-definidas (rejeitando termos livres arbitrários).
+
+**Acceptance criteria:**
+- [x] `/blacklist` e `!blacklist` aceitam apenas as 4 categorias (`slowed`, `slowed_intensificado`, `speed_up`, `speed_up_intensificado`, além de ações `add`, `remove`, `toggle`, `list`, `clear`) e rejeitam entradas arbitrárias informando as opções válidas.
+- [x] Músicas adicionadas manualmente pelo usuário via `/play` (`!play`) não sofrem interferência da blacklist.
+- [x] A configuração de blacklist persiste entre desconexões e reinicializações do bot por servidor.
+
+**Verification:**
+- [x] Tests pass: `npx vitest run tests/unit/guild-session.test.ts tests/unit/command-parser.test.ts`
+- [x] Build succeeds: `npm run build`
+
+**Dependencies:** Task 11
+
+**Files likely touched:**
+- `src/queue/guild-session.ts`
+- `src/bot/commands/index.ts`
+- `src/bot/commands/queue-commands.ts`
+- `tests/unit/guild-session.test.ts`
+- `tests/unit/command-parser.test.ts`
+
+**Estimated scope:** Medium: 4-5 files

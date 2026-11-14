@@ -90,6 +90,14 @@ A lista detalhada de tarefas com critérios de aceitação, comandos de verifica
 - [x] Testes unitários de `autoplay-resolver`, `guild-session` (música avulsa + fim de playlist) e `command-parser` passando
 - [x] Build TypeScript e linter limpos (`npm run build && npm test -- --run && npm run lint`)
 
+### Phase 6: Blacklist Categorizada de Variantes do Autoplay
+- [x] Task 11: Categorias de Blacklist, Persistência por Servidor (`guild-settings.ts`) e Substituição pela Versão Normal no `autoplay-resolver.ts`
+- [x] Task 12: Integração na `GuildSession` e Comando `/blacklist` (`!blacklist`) com Enum Estrito de Categorias
+
+### Checkpoint: Autoplay Blacklist Complete
+- [x] Testes unitários validando cada uma das 4 categorias (`slowed`, `slowed_intensificado`, `speed_up`, `speed_up_intensificado`), substituição pela versão normal apenas no Autoplay, persistência por servidor e rejeição de termos arbitrários
+- [x] Build TypeScript e linter limpos (`npm run build && npm test -- --run`)
+
 ## Risks and Mitigations
 
 | Risk | Impact | Mitigation |

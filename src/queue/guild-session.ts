@@ -20,7 +20,12 @@ import {
 } from '../resolvers/autoplay-resolver.js';
 import { logger } from '../utils/logger.js';
 import { TrackQueue } from './ring-queue.js';
-import { type CompactTrack, formatDuration, getSourceLabel } from './track.js';
+import {
+  type AutoplayBlacklistCategory,
+  type CompactTrack,
+  formatDuration,
+  getSourceLabel,
+} from './track.js';
 
 export type PlayResourceFn = (resource: AudioResource) => void;
 export type TextSender = { send(content: string): Promise<unknown> };
@@ -56,6 +61,7 @@ export class GuildSession {
   private readonly historyKeys = new Set<string>();
   private readonly historyOrder: Array<{ readonly id: string; readonly key: string }> = [];
   private autoplayEnabled: boolean;
+  private readonly autoplayBlacklist: Set<AutoplayBlacklistCategory>;
   private ingestingPlaylistCount = 0;
   private transitioning = false;
   private destroyed = false;
@@ -76,6 +82,7 @@ export class GuildSession {
     this.autoplayFetcher = autoplayFetcher ?? fetchAutoplayRecommendations;
     this.autoplayStore = autoplayStore ?? defaultGuildAutoplayStore;
     this.autoplayEnabled = this.autoplayStore.getAutoplay(guildId);
+    this.autoplayBlacklist = new Set(this.autoplayStore.getAutoplayBlacklist(guildId));
 
     this.player = createAudioPlayer({
       behaviors: {
@@ -121,6 +128,46 @@ export class GuildSession {
   // Indica se o modo de reprodução contínua (Autoplay) está ativo.
   public get autoplay(): boolean {
     return this.autoplayEnabled;
+  }
+
+  // Categorias atualmente bloqueadas para substituições automáticas no Autoplay.
+  public get blacklist(): readonly AutoplayBlacklistCategory[] {
+    return Array.from(this.autoplayBlacklist);
+  }
+
+  // Atualiza e persiste as categorias bloqueadas exclusivamente para o Autoplay do servidor.
+  public updateBlacklist(
+    action: 'add' | 'remove' | 'toggle' | 'clear',
+    category?: AutoplayBlacklistCategory,
+  ): { readonly active: boolean; readonly categories: readonly AutoplayBlacklistCategory[] } {
+    if (action === 'clear') {
+      this.autoplayBlacklist.clear();
+      this.autoplayStore.setAutoplayBlacklist(this.guildId, []);
+      return { active: false, categories: [] };
+    }
+
+    if (!category) {
+      return { active: false, categories: this.blacklist };
+    }
+
+    let active: boolean;
+    if (action === 'add') {
+      this.autoplayBlacklist.add(category);
+      active = true;
+    } else if (action === 'remove') {
+      this.autoplayBlacklist.delete(category);
+      active = false;
+    } else if (this.autoplayBlacklist.has(category)) {
+      this.autoplayBlacklist.delete(category);
+      active = false;
+    } else {
+      this.autoplayBlacklist.add(category);
+      active = true;
+    }
+
+    const categories = this.blacklist;
+    this.autoplayStore.setAutoplayBlacklist(this.guildId, categories);
+    return { active, categories };
   }
 
   // Ativa ou desativa o modo Autoplay de forma persistente para o servidor e preenche recomendações imediatas se aplicável.
@@ -187,6 +234,7 @@ export class GuildSession {
       limit: 5,
       excludeIds: new Set(this.historyIds),
       excludeKeys: new Set(this.historyKeys),
+      blacklist: this.blacklist,
       signal: controller.signal,
     })
       .then(async (recommendations) => {

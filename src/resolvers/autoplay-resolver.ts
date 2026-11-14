@@ -1,5 +1,11 @@
 import { getEnvConfig } from '../config/env.js';
-import type { CompactTrack, TrackSource } from '../queue/track.js';
+import {
+  type AutoplayBlacklistCategory,
+  type CompactTrack,
+  type TrackSource,
+  classifyAutoplayBlacklistCategory,
+  stripVariantModifiersFromTitle,
+} from '../queue/track.js';
 import { streamProcessLines } from '../utils/process-runner.js';
 import { parseYtDlpJsonLine, resolveSingleYoutubeTrack } from './youtube-resolver.js';
 
@@ -7,6 +13,7 @@ export interface AutoplayOptions {
   readonly limit?: number;
   readonly excludeIds?: ReadonlySet<string>;
   readonly excludeKeys?: ReadonlySet<string>;
+  readonly blacklist?: readonly AutoplayBlacklistCategory[];
   readonly signal?: AbortSignal;
   readonly resolveSeedTrack?: typeof resolveSingleYoutubeTrack;
   readonly mixLineStreamFactory?: (
@@ -137,6 +144,17 @@ export async function fetchAutoplayRecommendations(
   }
 
   const recommendations: CompactTrack[] = [];
+  const activeBlacklist = new Set(options.blacklist ?? []);
+  const isCandidateSeen = (track: CompactTrack): boolean => {
+    const vid = extractVideoIdFromTrack(track);
+    const key = buildTrackDedupeKey(track);
+    return (
+      seenIds.has(track.id) ||
+      Boolean(vid && (seenIds.has(`yt_${vid}`) || seenIds.has(`ytm_${vid}`))) ||
+      (key.length > 0 && seenKeys.has(key))
+    );
+  };
+
   const stream = createMixStream(
     mixUrl,
     options.mixLineStreamFactory ? options.signal : controller.signal,
@@ -149,32 +167,58 @@ export async function fetchAutoplayRecommendations(
       }
 
       const candidate = parseYtDlpJsonLine(line, targetSource, 'Autoplay');
-      if (!candidate) {
+      if (!candidate || isCandidateSeen(candidate)) {
         continue;
       }
 
-      const candidateVideoId = extractVideoIdFromTrack(candidate);
-      const dedupeKey = buildTrackDedupeKey(candidate);
+      let finalCandidate = candidate;
+      const blockedCategory =
+        activeBlacklist.size > 0 ? classifyAutoplayBlacklistCategory(candidate.title) : undefined;
+      if (blockedCategory && activeBlacklist.has(blockedCategory)) {
+        const cleanTitle = stripVariantModifiersFromTitle(candidate.title);
+        if (!cleanTitle) {
+          continue;
+        }
+        const cleanArtist = candidate.artist.trim();
+        const hasDistinctArtist =
+          cleanArtist.length > 0 &&
+          cleanArtist !== 'Artista Desconhecido' &&
+          !cleanTitle.toLowerCase().includes(cleanArtist.toLowerCase());
+        const normalQuery = hasDistinctArtist ? `${cleanArtist} - ${cleanTitle}` : cleanTitle;
 
-      if (
-        seenIds.has(candidate.id) ||
-        (candidateVideoId &&
-          (seenIds.has(`yt_${candidateVideoId}`) || seenIds.has(`ytm_${candidateVideoId}`))) ||
-        (dedupeKey.length > 0 && seenKeys.has(dedupeKey))
-      ) {
-        continue;
+        try {
+          const resolvedNormal = await resolveSeed(
+            normalQuery,
+            targetSource,
+            'Autoplay',
+            options.signal,
+          );
+          const resolvedCategory = classifyAutoplayBlacklistCategory(resolvedNormal.title);
+          if (resolvedCategory && activeBlacklist.has(resolvedCategory)) {
+            continue;
+          }
+          finalCandidate = { ...resolvedNormal, requestedBy: 'Autoplay' };
+        } catch {
+          continue;
+        }
+
+        if (isCandidateSeen(finalCandidate)) {
+          continue;
+        }
       }
 
-      seenIds.add(candidate.id);
-      if (candidateVideoId) {
-        seenIds.add(`yt_${candidateVideoId}`);
-        seenIds.add(`ytm_${candidateVideoId}`);
+      const finalVideoId = extractVideoIdFromTrack(finalCandidate);
+      const finalKey = buildTrackDedupeKey(finalCandidate);
+      seenIds.add(finalCandidate.id);
+      if (finalVideoId) {
+        seenIds.add(`yt_${finalVideoId}`);
+        seenIds.add(`ytm_${finalVideoId}`);
       }
-      if (dedupeKey.length > 0) {
-        seenKeys.add(dedupeKey);
+      if (finalKey.length > 0) {
+        seenKeys.add(finalKey);
       }
 
-      recommendations.push(candidate);
+      recommendations.push(finalCandidate);
       if (recommendations.length >= limit) {
         controller.abort();
         break;

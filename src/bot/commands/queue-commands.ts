@@ -1,5 +1,12 @@
 import { getGuildSession, getOrCreateGuildSession } from '../../queue/guild-session.js';
-import { type LoopMode, formatDuration } from '../../queue/track.js';
+import {
+  AUTOPLAY_BLACKLIST_CATEGORIES,
+  AUTOPLAY_BLACKLIST_LABELS,
+  type AutoplayBlacklistCategory,
+  type LoopMode,
+  formatDuration,
+  parseBlacklistCategory,
+} from '../../queue/track.js';
 import type { CommandContext } from '../command-context.js';
 
 // Exibe a fila paginada de até 25.000 músicas.
@@ -172,4 +179,130 @@ export async function handleClearCommand(ctx: CommandContext): Promise<void> {
   const count = session.queue.size;
   session.clearQueue();
   await ctx.reply(`Foram removidas **${count.toLocaleString('pt-BR')}** músicas da fila.`);
+}
+
+export type ParsedBlacklistArgs =
+  | { readonly kind: 'list' }
+  | { readonly kind: 'clear' }
+  | {
+      readonly kind: 'update';
+      readonly action: 'add' | 'remove' | 'toggle';
+      readonly category: AutoplayBlacklistCategory;
+    }
+  | { readonly kind: 'missing-category'; readonly action: 'add' | 'remove' | 'toggle' }
+  | { readonly kind: 'invalid-category'; readonly rawInput: string };
+
+const BLACKLIST_ACTION_ALIASES: Record<string, 'add' | 'remove' | 'toggle' | 'list' | 'clear'> = {
+  add: 'add',
+  adicionar: 'add',
+  remove: 'remove',
+  remover: 'remove',
+  rm: 'remove',
+  toggle: 'toggle',
+  alternar: 'toggle',
+  list: 'list',
+  listar: 'list',
+  clear: 'clear',
+  limpar: 'clear',
+};
+
+// Interpreta ação e categoria fechada do comando /blacklist (Slash ou Prefixo).
+export function parseBlacklistCommandArgs(
+  rawFirst?: string,
+  rawSecond?: string,
+): ParsedBlacklistArgs {
+  const first = rawFirst?.trim();
+  const second = rawSecond?.trim();
+
+  if (!first && !second) {
+    return { kind: 'list' };
+  }
+
+  let action: 'add' | 'remove' | 'toggle' = 'toggle';
+  let categoryRaw = first ?? '';
+
+  if (first) {
+    const tokens = first.split(/\s+/);
+    const maybeAction = tokens[0] ? BLACKLIST_ACTION_ALIASES[tokens[0].toLowerCase()] : undefined;
+    if (maybeAction) {
+      if (maybeAction === 'list') return { kind: 'list' };
+      if (maybeAction === 'clear') return { kind: 'clear' };
+      action = maybeAction;
+      const remainder = tokens.slice(1).join(' ').trim();
+      categoryRaw = remainder || second || '';
+    } else if (second) {
+      categoryRaw = second;
+    }
+  } else if (second) {
+    categoryRaw = second;
+  }
+
+  if (!categoryRaw) {
+    return { kind: 'missing-category', action };
+  }
+
+  const category = parseBlacklistCategory(categoryRaw);
+  if (!category) {
+    return { kind: 'invalid-category', rawInput: categoryRaw };
+  }
+
+  return { kind: 'update', action, category };
+}
+
+function formatValidBlacklistCategories(): string {
+  return AUTOPLAY_BLACKLIST_CATEGORIES.map(
+    (c) => `\`${c}\` (${AUTOPLAY_BLACKLIST_LABELS[c]})`,
+  ).join(', ');
+}
+
+// Configura a blacklist categorizada aplicável somente ao Autoplay do servidor.
+export async function handleBlacklistCommand(ctx: CommandContext): Promise<void> {
+  const session = getOrCreateGuildSession(ctx.guildId);
+  const parsed = parseBlacklistCommandArgs(
+    ctx.getStringArg('acao', 0),
+    ctx.getStringArg('categoria', 1),
+  );
+
+  if (parsed.kind === 'list') {
+    const active = session.blacklist;
+    if (active.length === 0) {
+      await ctx.reply(
+        `A blacklist do **Autoplay** está vazia.\nCategorias permitidas: ${formatValidBlacklistCategories()}.`,
+      );
+      return;
+    }
+    const labels = active.map((c) => `\`${c}\` (${AUTOPLAY_BLACKLIST_LABELS[c]})`).join(', ');
+    await ctx.reply(`Blacklist ativa do **Autoplay** (substitui pela versão normal): ${labels}.`);
+    return;
+  }
+
+  if (parsed.kind === 'clear') {
+    session.updateBlacklist('clear');
+    await ctx.reply('Blacklist do **Autoplay** limpa.');
+    return;
+  }
+
+  if (parsed.kind === 'missing-category') {
+    await ctx.reply(
+      `Informe uma categoria válida após \`${parsed.action}\`: ${formatValidBlacklistCategories()}.`,
+    );
+    return;
+  }
+
+  if (parsed.kind === 'invalid-category') {
+    await ctx.reply(
+      `Categoria inválida: \`${parsed.rawInput}\`. São permitidas apenas: ${formatValidBlacklistCategories()}.`,
+    );
+    return;
+  }
+
+  const result = session.updateBlacklist(parsed.action, parsed.category);
+  const label = AUTOPLAY_BLACKLIST_LABELS[parsed.category];
+  const stateText = result.active ? 'adicionada à' : 'removida da';
+  const activeSummary =
+    result.categories.length > 0 ? result.categories.map((c) => `\`${c}\``).join(', ') : 'nenhuma';
+
+  await ctx.reply(
+    `Categoria **${label}** (\`${parsed.category}\`) ${stateText} blacklist do **Autoplay**.\nAtivas: ${activeSummary}.`,
+  );
 }

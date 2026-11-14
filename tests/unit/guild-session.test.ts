@@ -12,10 +12,18 @@ import type { CompactTrack } from '../../src/queue/track.js';
 
 function createMemoryAutoplayStore(): GuildAutoplayStore {
   const map = new Map<string, boolean>();
+  const blacklists = new Map<
+    string,
+    ('slowed' | 'slowed_intensificado' | 'speed_up' | 'speed_up_intensificado')[]
+  >();
   return {
     getAutoplay: (guildId) => map.get(guildId) ?? false,
     setAutoplay: (guildId, enabled) => {
       map.set(guildId, enabled);
+    },
+    getAutoplayBlacklist: (guildId) => [...(blacklists.get(guildId) ?? [])],
+    setAutoplayBlacklist: (guildId, categories) => {
+      blacklists.set(guildId, [...categories]);
     },
   };
 }
@@ -327,5 +335,48 @@ describe('GuildSession (Orquestração de Fila, Pré-Buffer N/N+1 e Permanência
 
     const remainingAfterIds = session.queue.getPage(1, 10).items.map((t) => t.id);
     expect(remainingAfterIds).toEqual(remainingBeforeIds.filter((id) => id !== '4'));
+  });
+
+  it('persiste blacklist do autoplay por servidor e a aplica somente ao autoplay (nunca a /play manual)', async () => {
+    const tempDir = mkdtempSync(path.join(tmpdir(), 'bot-discord-blacklist-'));
+    const settingsFile = path.join(tempDir, 'guild-settings.json');
+
+    try {
+      const cache = new PrebufferCache(25 * 1024 * 1024, async () => ({
+        mode: 'ram',
+        buffer: Buffer.from([0x1a, 0x45, 0xdf, 0xa3]),
+      }));
+      const autoplaySpy = vi.fn(async () => [makeTrack('rec_bl')]);
+      const store1 = createGuildAutoplayStore(settingsFile);
+      const session1 = new GuildSession('guild_bl', 25_000, cache, vi.fn(), autoplaySpy, store1);
+
+      expect(session1.blacklist).toEqual([]);
+      session1.updateBlacklist('add', 'slowed');
+      session1.updateBlacklist('add', 'speed_up_intensificado');
+      session1.setAutoplay(true);
+
+      // Faixa manual com "(Slowed)" entra normalmente sem bloqueio.
+      const manualSlowed: CompactTrack = {
+        ...makeTrack('manual_slowed'),
+        title: 'HYPNOTIC (Slowed)',
+      };
+      await session1.enqueueAndPlay([manualSlowed]);
+      await new Promise((r) => setTimeout(r, 30));
+
+      expect(session1.nowPlaying?.title).toBe('HYPNOTIC (Slowed)');
+      expect(autoplaySpy).toHaveBeenCalledTimes(1);
+      expect(autoplaySpy.mock.calls[0]?.[1]?.blacklist).toEqual([
+        'slowed',
+        'speed_up_intensificado',
+      ]);
+
+      // Reinicialização preserva blacklist configurada para o servidor.
+      session1.stopAndDisconnect();
+      const store2 = createGuildAutoplayStore(settingsFile);
+      const session2 = new GuildSession('guild_bl', 25_000, cache, vi.fn(), autoplaySpy, store2);
+      expect(session2.blacklist).toEqual(['slowed', 'speed_up_intensificado']);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });
