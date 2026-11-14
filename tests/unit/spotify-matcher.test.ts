@@ -13,7 +13,9 @@ describe('Spotify Hybrid Resolver & Lazy Matcher', () => {
       isrc: 'USQX91300106',
     });
 
-    expect(query).toBe('Daft Punk, Julian Casablancas - Instant Crush (feat. Julian Casablancas) audio');
+    expect(query).toBe(
+      'Daft Punk, Julian Casablancas - Instant Crush (feat. Julian Casablancas) audio',
+    );
   });
 
   it('cria CompactTrack lazy para o Spotify sem requisitar o YouTube antecipadamente', () => {
@@ -81,5 +83,18 @@ describe('Spotify Hybrid Resolver & Lazy Matcher', () => {
     expect(tracks[0]?.artist).toBe('Artista A, Artista B');
     expect(tracks[1]?.id).toBe('sp_222');
   });
-});
 
+  it('normaliza espaços inquebráveis (\\u00a0) em artista e título do Spotify', () => {
+    const track = buildSpotifyCompactTrack({
+      id: 'track_nbsp',
+      title: 'BREGA\u00a0ASSUMPTIONS',
+      artists: ['DJ NOLOTIL,\u00a0Mc Gw'],
+      durationMs: 89_000,
+    });
+
+    expect(track.artist).toBe('DJ NOLOTIL, Mc Gw');
+    expect(track.title).toBe('BREGA ASSUMPTIONS');
+    expect(track.locator).toBe('DJ NOLOTIL, Mc Gw - BREGA ASSUMPTIONS audio');
+    expect(track.locator).not.toContain('\u00a0');
+  });
+});

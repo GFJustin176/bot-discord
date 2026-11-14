@@ -248,4 +248,40 @@ describe('GuildSession (Orquestração de Fila, Pré-Buffer N/N+1 e Permanência
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  it('inicia reprodução do lote seguinte se o primeiro lote falhar e deixar a sessão ociosa', async () => {
+    const webmBytes = Buffer.from([0x1a, 0x45, 0xdf, 0xa3]);
+    const cache = new PrebufferCache(25 * 1024 * 1024, async (track) => {
+      if (track.id === 't1') {
+        throw new Error('Buffer de áudio vazio');
+      }
+      return { mode: 'ram', buffer: webmBytes };
+    });
+
+    const playResourceSpy = vi.fn();
+    const session = new GuildSession(
+      'guild_stream_recover',
+      25_000,
+      cache,
+      playResourceSpy,
+      undefined,
+      createMemoryAutoplayStore(),
+    );
+
+    async function* fakeStream(): AsyncGenerator<CompactTrack[], void, undefined> {
+      yield [makeTrack('t1')];
+      await new Promise((r) => setTimeout(r, 30));
+      yield [makeTrack('t2'), makeTrack('t3')];
+    }
+
+    await session.ingestTrackStream(fakeStream());
+    expect(session.nowPlaying).toBeUndefined();
+
+    await new Promise((r) => setTimeout(r, 60));
+
+    expect(session.nowPlaying?.id).toBe('t2');
+    expect(playResourceSpy).toHaveBeenCalledTimes(1);
+    expect(session.queue.size).toBe(1);
+    expect(session.queue.peek(0)?.id).toBe('t3');
+  });
 });

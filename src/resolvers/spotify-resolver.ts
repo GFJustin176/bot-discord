@@ -21,13 +21,24 @@ let tokenCache: CachedSpotifyToken | undefined;
  * Monta a string de busca tardia (lazy locator) que será consultada no YouTube/YT Music
  * somente quando a faixa estiver prestes a entrar no pré-buffer em RAM.
  */
+function normalizeSpotifyText(value: string): string {
+  return value
+    .replace(/\u00a0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export function buildSpotifyLazySearchQuery(meta: {
   readonly title: string;
   readonly artists: readonly string[];
   readonly isrc?: string;
 }): string {
-  const artistStr = meta.artists.filter((a) => a.trim().length > 0).join(', ') || 'Unknown Artist';
-  return `${artistStr} - ${meta.title.trim()} audio`;
+  const artistStr =
+    meta.artists
+      .map(normalizeSpotifyText)
+      .filter((a) => a.length > 0)
+      .join(', ') || 'Unknown Artist';
+  return `${artistStr} - ${normalizeSpotifyText(meta.title)} audio`;
 }
 
 /**
@@ -37,11 +48,15 @@ export function buildSpotifyCompactTrack(
   meta: SpotifyRawTrackMeta,
   requestedBy?: string,
 ): CompactTrack {
-  const artist = meta.artists.filter((a) => a.trim().length > 0).join(', ') || 'Artista Desconhecido';
+  const artist =
+    meta.artists
+      .map(normalizeSpotifyText)
+      .filter((a) => a.length > 0)
+      .join(', ') || 'Artista Desconhecido';
   return {
     id: `sp_${meta.id}`,
     source: 'spotify',
-    title: meta.title.trim(),
+    title: normalizeSpotifyText(meta.title),
     artist,
     durationMs: meta.durationMs > 0 ? meta.durationMs : 0,
     locator: buildSpotifyLazySearchQuery(meta),
@@ -409,4 +424,3 @@ export async function* resolveSpotifyStream(
     yield capped.slice(1);
   }
 }
-

@@ -107,15 +107,51 @@ export async function defaultYtDlpRamLoader(
   try {
     return await fetchTarget(initialTarget);
   } catch (err) {
-    // shortcut: busca alternativa se o ID direto da playlist foi removido ou bloqueado na regiao
-    if (isHttp && !signal.aborted) {
-      const query =
-        track.artist && !track.title.toLowerCase().includes(track.artist.toLowerCase())
-          ? `ytsearch1:${track.artist} - ${track.title} audio`
-          : `ytsearch1:${track.title} audio`;
-      return await fetchTarget(query);
+    if (signal.aborted) {
+      throw err;
     }
-    throw err;
+
+    const cleanArtist = (track.artist ?? '')
+      .replace(/\u00a0/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const cleanTitle = track.title
+      .replace(/\u00a0/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const hasDistinctArtist =
+      cleanArtist.length > 0 && !cleanTitle.toLowerCase().includes(cleanArtist.toLowerCase());
+
+    const fallbackTargets: string[] = [];
+    if (isHttp) {
+      // Busca alternativa caso a URL direta tenha sido removida ou bloqueada na região.
+      fallbackTargets.push(
+        hasDistinctArtist
+          ? `ytsearch1:${cleanArtist} - ${cleanTitle} audio`
+          : `ytsearch1:${cleanTitle} audio`,
+      );
+    }
+
+    // Recorre à busca sem o sufixo "audio" quando a consulta estrita não retorna correspondência.
+    const cleanSearch = hasDistinctArtist
+      ? `ytsearch1:${cleanArtist} ${cleanTitle}`
+      : `ytsearch1:${cleanTitle}`;
+    if (cleanSearch !== initialTarget && !fallbackTargets.includes(cleanSearch)) {
+      fallbackTargets.push(cleanSearch);
+    }
+
+    let lastErr: unknown = err;
+    for (const target of fallbackTargets) {
+      try {
+        return await fetchTarget(target);
+      } catch (fallbackErr) {
+        if (signal.aborted) {
+          throw fallbackErr;
+        }
+        lastErr = fallbackErr;
+      }
+    }
+    throw lastErr;
   }
 }
 
@@ -235,4 +271,3 @@ export class PrebufferCache {
     this.guilds.delete(guildId);
   }
 }
-

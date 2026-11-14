@@ -301,8 +301,13 @@ export class GuildSession {
               break;
             }
             const inserted = this.queue.enqueueBatch(batch);
-            if (inserted > 0 && this.queue.size === inserted) {
-              this.triggerNextTrackPrefetch();
+            if (inserted > 0) {
+              if (!this.currentTrack && !this.transitioning) {
+                // Inicia o próximo lote caso o lote inicial tenha falhado e deixado a sessão ociosa.
+                await this.advanceToNextTrack();
+              } else if (this.queue.size === inserted) {
+                this.triggerNextTrackPrefetch();
+              }
             }
           }
         } catch (err) {
